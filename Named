@@ -1,0 +1,543 @@
+
+// ==UserScript==
+// @name ASIN Counter and Decision Tracker
+// @namespace combined_asin_tools
+// @description Tracks ASIN decisions with logs, restore, CSV export, cross-tab sync, and adds ASIN/Payload count with target tracking.
+// @author @abdilolh
+// @version 1.2
+// @match https://ir-editor.amazon.com/*
+// @require https://code.jquery.com/jquery-3.6.0.min.js
+// @require https://gist.github.com/raw/2625891/waitForKeyElements.js
+// @homepageURL https://sapp.amazon.com/gco_tools/marconi/index.html
+// @grant GM_setValue
+// @grant GM_getValue
+// @grant GM_addStyle
+// @grant GM_addValueChangeListener
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    // ASIN Counter Progress BETA variables
+    let mode = GM_getValue("mode", "asin"); // "asin" or "payload"
+    let daily_target = GM_getValue("daily_target", 500);
+    let non_productive_minutes = GM_getValue("non_productive_minutes", 0);
+    let notified = false;
+    // lastProgress will now reflect the actual progress value, used for initial render of the progress bar
+    // The transition will handle the smooth animation between updates.
+    let question_num = 0;
+    const working_hours = 8;
+
+    // ASIN Decision Tracker variables
+    let decisionCount = 0;
+    let decisionMap = {};
+    let dayLogs = [];
+    let channelDecisionMap = {};
+    const currentChannelId = window.location.href.slice(-8);
+
+    // Common functions for both scripts
+    async function loadData() {
+        // Load data for ASIN Decision Tracker
+        decisionCount = parseInt(await GM_getValue('asinDecisionCount', 0));
+        decisionMap = JSON.parse(await GM_getValue('asinDecisionMap', '{}'));
+        dayLogs = JSON.parse(await GM_getValue('asinDayLogs', '[]'));
+        channelDecisionMap = JSON.parse(await GM_getValue('asinChannelMap', '{}'));
+
+        // Load data for ASIN Counter Progress
+        mode = GM_getValue("mode", "asin");
+        daily_target = GM_getValue("daily_target", 500);
+        non_productive_minutes = GM_getValue("non_productive_minutes", 0);
+
+        updateCombinedUI();
+    }
+
+    async function saveData() {
+        // Save data for ASIN Decision Tracker
+        await GM_setValue('asinDecisionCount', decisionCount);
+        await GM_setValue('asinDecisionMap', JSON.stringify(decisionMap));
+        await GM_setValue('asinDayLogs', JSON.stringify(dayLogs));
+        await GM_setValue('asinChannelMap', JSON.stringify(channelDecisionMap));
+
+        // Save data for ASIN Counter Progress
+        GM_setValue("daily_target", daily_target);
+        GM_setValue("non_productive_minutes", non_productive_minutes);
+        GM_setValue("mode", mode);
+    }
+
+    // ASIN Counter Progress BETA functions
+    function resetIfNeeded() {
+        const today = new Date().toDateString();
+        const storedDate = GM_getValue("counter_date", "");
+        if (storedDate !== today) {
+            GM_setValue("counter_value", 0);
+            GM_setValue("counter_date", today);
+        }
+    }
+
+    function getAdjustedTarget() {
+        const totalMinutes = working_hours * 60;
+        const effectiveMinutes = totalMinutes - non_productive_minutes;
+        const ratio = Math.max(0, effectiveMinutes / totalMinutes);
+        return Math.round(ratio * daily_target);
+    }
+
+    function getCounter(updateVal = 0) {
+        resetIfNeeded();
+        let counter = GM_getValue("counter_value", 0) + updateVal;
+        GM_setValue("counter_value", counter);
+        return counter;
+    }
+
+    function calculateProgress(current) {
+        return Math.min(parseFloat(((current / getAdjustedTarget()) * 100).toFixed(2)), 100);
+    }
+
+    function openSettingsDialog() {
+        $('.custom-dialog-overlay').remove();
+        const dialog = $(`
+            <div class="custom-dialog-overlay" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.4); display: flex; justify-content: center; align-items: center; z-index: 9999;">
+                <div style="background: rgba(255,255,255,0.95); padding: 24px; border-radius: 12px; width: 320px; font-family: 'Segoe UI', sans-serif; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
+                    <h3 style="margin: 0 0 16px; font-size: 18px; color: #222;">Tracker Settings</h3>
+                    <label>Mode:</label>
+                    <select id="mode-select" style="width: 100%; padding: 10px; margin-bottom: 16px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px;">
+                        <option value="asin" ${mode === 'asin' ? 'selected' : ''}>ASIN Counter</option>
+                        <option value="payload" ${mode === 'payload' ? 'selected' : ''}>Payload (Question) Counter</option>
+                    </select>
+                    <label>Daily Target:</label>
+                    <input type="number" id="target-input" value="${daily_target}" style="width: 100%; padding: 10px; margin-bottom: 16px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px;">
+                    <label>Non-Productive Time (minutes):</label>
+                    <input type="number" id="nph-input" value="${non_productive_minutes}" min="0" max="480" style="width: 100%; padding: 10px; margin-bottom: 24px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px;">
+                    <div style="display: flex; justify-content: space-between; gap: 10px;">
+                        <button class="cancel-btn" style="flex: 1; padding: 10px; background: #e0e0e0; border: none; border-radius: 6px; font-size: 14px; cursor: pointer;">Cancel</button>
+                        <button class="save-btn" style="flex: 1; padding: 10px; background: #8e44ad; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer;">Save</button>
+                    </div>
+                </div>
+            </div>
+        `);
+
+        dialog.find(".cancel-btn").click(() => dialog.remove());
+        dialog.find(".save-btn").click(() => {
+            const newTarget = parseInt($('#target-input').val());
+            const newNPH = parseInt($('#nph-input').val());
+            const newMode = $('#mode-select').val();
+
+            if (newTarget > 0 && newNPH >= 0 && newNPH <= 480) {
+                daily_target = newTarget;
+                non_productive_minutes = newNPH;
+                mode = newMode;
+
+                saveData(); // Save updated settings
+                notified = false;
+                updateCombinedUI(); // Update UI after settings change
+                dialog.remove();
+            } else {
+                alert("Please enter valid values.");
+            }
+        });
+
+        $('body').append(dialog);
+    }
+
+    function enableQuestion() {
+        const taskTitle = $("div.task-queue-title h5 span").text();
+        const match = taskTitle.match(/Question\s+(\d+)/);
+        if (match) question_num = match[1];
+    }
+
+    function checkForNewQuestion() {
+        if (question_num !== 0) {
+            const prev = GM_getValue("last_question_num", 0);
+            if (question_num == prev) return false;
+            GM_setValue("last_question_num", question_num);
+            return true;
+        }
+        return true;
+    }
+
+    let lastSubmitTime = 0;
+    function handleSubmitClick() {
+        const now = Date.now();
+        if (now - lastSubmitTime < 1000) return;
+        lastSubmitTime = now;
+        if (!checkForNewQuestion()) return;
+
+        const valueToAdd = (mode === "asin") ?
+            document.querySelectorAll('.awsui-popover__trigger a').length : // For ASIN counter, count ASINs in popover
+            1; // For Payload counter, count as 1 question
+
+        getCounter(valueToAdd); // Update the ASIN/Payload counter
+        updateCombinedUI();
+    }
+
+    // ASIN Decision Tracker functions
+    function getQuestionId() {
+        const h5 = document.querySelector('.task-queue-title h5');
+        if (!h5) return null;
+        const match = h5.textContent.match(/[a-f0-9]{32}/i);
+        return match ? match[0] : null;
+    }
+
+    function getAsinFromGrid(gridItem) {
+        const asinLink = gridItem.querySelector('a');
+        return asinLink ? asinLink.textContent.trim() : null;
+    }
+
+    async function saveLap() {
+        if (dayLogs.length < 5) {
+            dayLogs.push(decisionCount);
+        } else {
+            dayLogs.shift();
+            dayLogs.push(decisionCount);
+        }
+        await saveData();
+        updateCombinedUI();
+    }
+
+    async function restoreDecisions() {
+        const questionId = getQuestionId();
+        if (!questionId) return;
+        document.querySelectorAll('.label-map-grid-item').forEach(grid => {
+            const asin = getAsinFromGrid(grid);
+            const key = `${questionId}_${asin}`;
+            const decision = decisionMap[key];
+            if (decision) {
+                const buttons = grid.querySelectorAll('.label-map-label-button');
+                buttons.forEach(btn => btn.classList.remove('selected-button'));
+                for (const btn of buttons) {
+                    if (btn.textContent.trim() === decision.buttonText) {
+                        btn.classList.add('selected-button');
+                        grid.style.backgroundColor = 'rgba(147, 112, 219, 0.2)'; // Light purple for selected ASINs
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    async function clearCount() {
+        decisionCount = 0;
+        decisionMap = {};
+        await saveData();
+        document.querySelectorAll('.label-map-grid-item').forEach(g => {
+            g.style.backgroundColor = '';
+            g.querySelectorAll('.label-map-label-button').forEach(btn => btn.classList.remove('selected-button'));
+        });
+        updateCombinedUI();
+    }
+
+    async function clearLastDay() {
+        if (dayLogs.length > 0) {
+            dayLogs.pop();
+            await saveData();
+            updateCombinedUI();
+        }
+    }
+
+    function downloadCSV() {
+        let csvContent = "data:text/csv;charset=utf-8,Day,ASINs Completed\n";
+        dayLogs.forEach((count, index) => {
+            csvContent += `Day ${index + 1},${count}\n`;
+        });
+        const total = dayLogs.reduce((sum, val) => sum + val, 0);
+        csvContent += `\nTotal,${total}\n`;
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement('a');
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", "asin_day_logs.csv");
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    function makeDraggable(elm) {
+        elm.onmousedown = function (e) {
+            let offsetX = e.clientX - elm.offsetLeft;
+            let offsetY = e.clientY - elm.offsetTop;
+            function mouseMove(e) {
+                elm.style.top = `${e.clientY - offsetY}px`;
+                elm.style.left = `${e.clientX - offsetX}px`;
+                elm.style.right = 'auto';
+            }
+            function stopDrag() {
+                document.removeEventListener('mousemove', mouseMove);
+                document.removeEventListener('mouseup', stopDrag);
+            }
+            document.addEventListener('mousemove', mouseMove);
+            document.addEventListener('mouseup', stopDrag);
+        };
+    }
+
+    async function handleDecisionClick(event) {
+        const btn = event.target.closest('.label-map-label-button');
+        if (!btn) return;
+        const gridItem = btn.closest('.label-map-grid-item');
+        const asin = getAsinFromGrid(gridItem);
+        const questionId = getQuestionId();
+        if (!asin || !questionId) return;
+        const key = `${questionId}_${asin}`;
+        const isFirstTime = !decisionMap[key];
+        gridItem.querySelectorAll('.label-map-label-button').forEach(b => b.classList.remove('selected-button'));
+        btn.classList.add('selected-button');
+        gridItem.style.backgroundColor = 'rgba(147, 112, 219, 0.2)'; // Light purple for selected ASINs
+        decisionMap[key] = { buttonText: btn.textContent.trim() };
+        if (isFirstTime) {
+            decisionCount++;
+        }
+        await saveData();
+        updateCombinedUI();
+    }
+
+    // Unified UI Update Function
+    function updateCombinedUI() {
+        const count = getCounter(0);
+        const target = getAdjustedTarget();
+        const progress = calculateProgress(count);
+
+        // Main draggable container for ASIN Decision Tracker
+        let mainContainer = document.getElementById('asin-tracker-combined-container');
+        if (!mainContainer) {
+            mainContainer = document.createElement('div');
+            mainContainer.id = 'asin-tracker-combined-container';
+            mainContainer.innerHTML = `
+                <div id="asin-combined-header" style="display: flex; justify-content: space-between; align-items: center;">
+                    <strong>ASIN Decisions:</strong> <span id="asin-decision-counter">${decisionCount}</span>
+                    <button id="toggle-details" class="header-button">Menu ▼</button>
+                </div>
+
+                <div id="asin-counter-details" style="display: none; margin-top: 10px;">
+                    <div style="margin-bottom: 6px;"><strong>Channel:</strong> ${currentChannelId}</div>
+                    <button id="lap-button" class="action-button primary">Record</button>
+                    <button id="restore-button" class="action-button info">Restore</button>
+                    <button id="clear-count" class="action-button danger">Clear Decision Count</button>
+                    <button id="clear-last-day" class="action-button warning">Clear Last Day Log</button>
+                    <button id="download-days" class="action-button success">Download CSV</button>
+                    <button id="toggle-days" class="action-button secondary">Show/Hide Day Logs</button>
+                    <div id="day-logs" style="display: none; margin-top: 10px;"></div>
+                </div>`;
+
+            Object.assign(mainContainer.style, {
+                position: 'fixed',
+                top: '20px',
+                right: '20px',
+                zIndex: '9999',
+                fontSize: '14px',
+                background: 'rgba(255, 255, 255, 0.95)', // White background
+                color: '#333', // Dark text
+                padding: '10px',
+                borderRadius: '10px',
+                boxShadow: '0 0 15px rgba(0,0,0,0.2)',
+                maxWidth: '300px',
+                cursor: 'grab',
+                fontFamily: '"Segoe UI", Tahoma, Geneva, Verdana, sans-serif'
+            });
+            document.body.appendChild(mainContainer);
+            makeDraggable(mainContainer);
+
+            document.getElementById('toggle-details').onclick = () => {
+                const details = document.getElementById('asin-counter-details');
+                details.style.display = details.style.display === 'none' ? 'block' : 'none';
+            };
+            document.getElementById('lap-button').onclick = saveLap;
+            document.getElementById('restore-button').onclick = restoreDecisions;
+            document.getElementById('clear-count').onclick = clearCount;
+            document.getElementById('clear-last-day').onclick = clearLastDay;
+            document.getElementById('toggle-days').onclick = () => {
+                const logDiv = document.getElementById('day-logs');
+                logDiv.style.display = logDiv.style.display === 'none' ? 'block' : 'none';
+            };
+            document.getElementById('download-days').onclick = downloadCSV;
+        }
+
+        // Separate Progress Bar container
+        let progressBarContainer = document.getElementById('asin-progress-bar-container');
+        if (!progressBarContainer) {
+            progressBarContainer = document.createElement('div');
+            progressBarContainer.id = 'asin-progress-bar-container';
+            progressBarContainer.innerHTML = `
+                <div class="progress-header">
+                    <span class="task-count-display">[ ${count} / ${target} ${mode === 'asin' ? 'ASINs' : 'Payloads'} ]</span>
+                    <span class="progress-percentage">(${progress}%)</span>
+                    <button class="settings-btn control-button">Settings</button>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: ${progress}%;"></div>
+                </div>
+            `;
+            Object.assign(progressBarContainer.style, {
+                position: 'fixed',
+                bottom: '20px',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                zIndex: '9998',
+                background: 'rgba(255, 255, 255, 0.95)', // White background
+                color: '#333',
+                padding: '15px 20px',
+                borderRadius: '12px',
+                boxShadow: '0 4px 15px rgba(0,0,0,0.2)',
+                width: 'min(90%, 500px)', // Responsive width
+                fontFamily: '"Segoe UI", Tahoma, Geneva, Verdana, sans-serif'
+            });
+            document.body.appendChild(progressBarContainer);
+            progressBarContainer.querySelector(".settings-btn").onclick = openSettingsDialog;
+        }
+
+        // Update ASIN Decision Counter
+        document.getElementById('asin-decision-counter').textContent = decisionCount;
+        updateDayLogs();
+
+        // Update ASIN/Payload Counter Progress
+        const taskCountDisplay = progressBarContainer.querySelector(".task-count-display");
+        const progressPercentage = progressBarContainer.querySelector(".progress-percentage");
+        const progressFill = progressBarContainer.querySelector(".progress-fill");
+
+        taskCountDisplay.textContent = `[ ${count} / ${target} ${mode === 'asin' ? 'ASINs' : 'Payloads'} ]`;
+        progressPercentage.textContent = `(${progress}%)`;
+        progressFill.style.width = `${progress}%`; // Corrected: Use 'progress' directly
+        progressFill.style.backgroundColor = progress >= 100 ? '#8e44ad' : '#9b59b6'; // Purple for fill
+
+        if (progress >= 100 && !notified) {
+            notified = true;
+            alert("🎉 Congratulations! You've reached your target!");
+        }
+    }
+
+    function updateDayLogs() {
+        const logContainer = document.getElementById('day-logs');
+        if (!logContainer) return;
+        logContainer.innerHTML = '';
+        for (let i = 0; i < 5; i++) {
+            const day = document.createElement('div');
+            day.textContent = `Day ${i + 1}: ${dayLogs[i] || 0}`;
+            day.style.cssText = `
+                padding: 5px 0;
+                border-bottom: 1px dashed #eee;
+                color: #555;
+            `;
+            logContainer.appendChild(day);
+        }
+        if (dayLogs.length > 0) {
+             logContainer.lastChild.style.borderBottom = 'none'; // Remove border from last item
+        }
+    }
+
+    // Sync across tabs for decision tracker
+    GM_addValueChangeListener('asinDecisionMap', (n, o, val) => {
+        decisionMap = JSON.parse(val);
+        updateCombinedUI(); // Ensure UI is updated on external changes
+    });
+    GM_addValueChangeListener('asinDecisionCount', (n, o, val) => {
+        decisionCount = parseInt(val);
+        updateCombinedUI();
+    });
+    GM_addValueChangeListener('counter_value', (n, o, val) => {
+        updateCombinedUI(); // Update UI if counter_value changes externally
+    });
+    GM_addValueChangeListener('mode', (n, o, val) => {
+        mode = val;
+        updateCombinedUI();
+    });
+    GM_addValueChangeListener('daily_target', (n, o, val) => {
+        daily_target = parseInt(val);
+        updateCombinedUI();
+    });
+    GM_addValueChangeListener('non_productive_minutes', (n, o, val) => {
+        non_productive_minutes = parseInt(val);
+        updateCombinedUI();
+    });
+
+
+    // Initial setup and event listeners
+    GM_addStyle(`
+        .selected-button {
+            outline: 3px solid #9b59b6 !important; /* Purple outline for selected ASIN */
+        }
+        /* Styles for the main decision tracker container */
+        #asin-tracker-combined-container button {
+            border: none;
+            border-radius: 6px;
+            padding: 8px 12px;
+            margin: 5px 2px;
+            font-size: 13px;
+            cursor: pointer;
+            color: white;
+            transition: background-color 0.2s ease, opacity 0.2s ease;
+        }
+        #asin-tracker-combined-container button:hover {
+            opacity: 0.9;
+        }
+
+        /* Header button */
+        #asin-tracker-combined-container .header-button {
+            background-color: #6a11cb; /* Darker purple */
+        }
+
+        /* Action buttons with distinct colors */
+        .action-button.primary { background-color: #9b59b6; } /* Purple */
+        .action-button.info { background-color: #3498db; }    /* Blue */
+        .action-button.danger { background-color: #e74c3c; }   /* Red */
+        .action-button.warning { background-color: #f39c12; }  /* Orange */
+        .action-button.success { background-color: #27ae60; }  /* Green */
+        .action-button.secondary { background-color: #7f8c8d; } /* Grey */
+
+        /* Progress bar container styles */
+        #asin-progress-bar-container {
+            font-family: '"Segoe UI", Tahoma, Geneva, Verdana, sans-serif';
+        }
+        #asin-progress-bar-container .progress-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        #asin-progress-bar-container .task-count-display {
+            font-size: 16px;
+            font-weight: 600;
+            color: #333;
+        }
+        #asin-progress-bar-container .progress-percentage {
+            font-size: 14px;
+            color: #555;
+        }
+        #asin-progress-bar-container .control-button {
+            padding: 8px 15px;
+            background: linear-gradient(to right, #6a11cb, #2575fc); /* Purple to blue gradient */
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        #asin-progress-bar-container .control-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        .progress-bar {
+            height: 15px;
+            background-color: #e0e0e0;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .progress-fill {
+            height: 100%;
+            background-color: #9b59b6; /* Purple fill */
+            border-radius: 8px;
+            transition: width 0.6s ease-in-out, background-color 0.3s ease;
+        }
+    `);
+
+    document.addEventListener('click', handleDecisionClick);
+
+    // Initialize ASIN Counter Progress listeners using waitForKeyElements
+    waitForKeyElements("awsui-button.cluster-question-top-bar-submit", (btn) => {
+        $(btn).on("click", handleSubmitClick);
+    });
+
+    waitForKeyElements("awsui-button.label-map-question-submit", (btn) => {
+        $(btn).on("click", handleSubmitClick);
+    });
+
+    waitForKeyElements("div.task-queue-title > h5 > span", enableQuestion);
+    waitForKeyElements("div.task-queue-right", loadData); // Initialize with loadData once a key element is present
+})();
