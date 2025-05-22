@@ -1,18 +1,4 @@
-Okay, I understand. You want a very sleek, minimalist UI for the main draggable element, with only the essential information visible at first glance: ASIN decision count, progress bar, and a single "Menu" button to reveal the rest of the options.
-Here's how I'll modify the script to achieve that:
- * Streamlined Main UI:
-   * The primary view of the draggable container will only show:
-     * "ASIN Decisions: [Count]"
-     * The Progress Bar
-     * A "Menu" button (which toggles the detailed view).
-   * All other buttons (Record, Restore, Clear, Download, Settings, Day Logs) will be hidden by default within the togglable "Menu" section.
- * Sleek Appearance: Further refine CSS for a cleaner, more integrated look.
-   * Reduce padding/margins where appropriate.
-   * Ensure the progress bar fits seamlessly into the reduced space.
-   * Maintain the white/purple theme and distinct button colors.
- * No handleSubmitClick from old script: Confirmed that the decisionCount is incremented solely by handleDecisionClick when an ASIN is marked, and this count drives the progress bar. The old handleSubmitClick logic and its associated variables (mode, question_num, etc.) are completely removed, as per your instruction.
- * Green Highlight: Keep rgba(0, 128, 0, 0.2) for the ASIN grid highlight.
-Here's the updated script:
+
 // ==UserScript==
 // @name ASIN Counter and Decision Tracker
 // @namespace combined_asin_tools
