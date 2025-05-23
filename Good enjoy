@@ -1,0 +1,631 @@
+Okay, I've significantly revised the script's styling to meet your requests for simpler and fewer colors, an even smaller and sleeker external appearance, and a simple font for the "ASIN Decisions" display.
+Here's a breakdown of the key changes:
+ * Color Palette Simplification:
+   * The overall color scheme is now much more muted, relying on a grayscale palette (white, light grays, medium/dark grays) for the main UI and most buttons.
+   * A medium-dark gray (#5A5A5A) is used as the primary accent for header text and the progress bar fill.
+   * Most action buttons now have a light gray background with a thin border, removing the varied colors for a more uniform and less distracting look.
+   * Color is used very sparingly:
+     * A muted red for the "Clear All Count" (danger) button.
+     * A muted green for the "Download CSV" (success) button.
+     * The "Menu" button and the dialog "Save" button also use the primary gray accent.
+   * This approach drastically reduces the number of distinct colors.
+ * Smaller and Sleeker Exterior:
+   * Container: Reduced padding, a slightly smaller maximum width (260px), and a more subtle box shadow.
+   * Header: Font sizes for the "ASIN Decisions" label and count have been reduced. Padding and margins are tighter. The "Menu" button is also smaller.
+   * Progress Section: The progress bar is thinner, and internal padding/margins have been minimized. The percentage text is smaller.
+   * Overall Font: Changed to the Arial, Helvetica, sans-serif stack, which is a very common, simple, and clear sans-serif font. This applies to the main UI and the dialog.
+   * Buttons: Action buttons within the menu are more compact. Their shadows have been removed in favor of a light border for the default style, with minimal shadow only on the unbordered colored buttons.
+ * Simple Font for "ASIN Decisions":
+   * The entire UI now uses the Arial font stack.
+   * The "ASIN Decisions:" label is styled with the header's base font size (14px) and bolded by the <strong> tag. The count itself is slightly larger (16px) for emphasis. This maintains simplicity while ensuring readability.
+These changes collectively aim for a highly minimalist, unobtrusive, and professional-looking UI element that takes up less space and is visually quieter.
+Here's the updated script:
+// ==UserScript==
+// @name ASIN Counter and Decision Tracker
+// @namespace combined_asin_tools
+// @description Tracks ASIN decisions with logs, restore, CSV export, cross-tab sync, and adds decision count with target tracking.
+// Sleek UI.
+// @author @abdilolh
+// @version 1.9
+// @match https://ir-editor.amazon.com/*
+// @require https://code.jquery.com/jquery-3.6.0.min.js
+// @require https://gist.github.com/raw/2625891/waitForKeyElements.js
+// @homepageURL https://sapp.amazon.com/gco_tools/marconi/index.html
+// @grant GM_setValue
+// @grant GM_getValue
+// @grant GM_addStyle
+// @grant GM_addValueChangeListener
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    let daily_target = GM_getValue("daily_target", 500);
+    let non_productive_minutes = GM_getValue("non_productive_minutes", 0);
+    let notified = false;
+    const working_hours = 8;
+
+    let decisionCount = 0;
+    let decisionMap = {};
+    let dayLogs = [];
+    const currentChannelId = window.location.href.slice(-8);
+
+    async function loadData() {
+        decisionCount = parseInt(await GM_getValue('asinDecisionCount', 0));
+        decisionMap = JSON.parse(await GM_getValue('asinDecisionMap', '{}'));
+        dayLogs = JSON.parse(await GM_getValue('asinDayLogs', '[]'));
+        daily_target = GM_getValue("daily_target", 500);
+        non_productive_minutes = GM_getValue("non_productive_minutes", 0);
+        updateCombinedUI();
+    }
+
+    async function saveData() {
+        await GM_setValue('asinDecisionCount', decisionCount);
+        await GM_setValue('asinDecisionMap', JSON.stringify(decisionMap));
+        await GM_setValue('asinDayLogs', JSON.stringify(dayLogs));
+        GM_setValue("daily_target", daily_target);
+        GM_setValue("non_productive_minutes", non_productive_minutes);
+    }
+
+    function getAdjustedTarget() {
+        const totalMinutes = working_hours * 60;
+        const effectiveMinutes = totalMinutes - non_productive_minutes;
+        const ratio = Math.max(0, effectiveMinutes / totalMinutes);
+        return Math.round(ratio * daily_target);
+    }
+
+    function calculateProgress(current) {
+        return Math.min(parseFloat(((current / getAdjustedTarget()) * 100).toFixed(2)), 100);
+    }
+
+    function openSettingsDialog() {
+        $('.custom-dialog-overlay').remove();
+        const dialog = $(`
+            <div class="custom-dialog-overlay">
+                <div class="dialog-content">
+                    <h3 class="dialog-title">Tracker Settings</h3>
+                    <p>These settings apply to the ASIN Decisions count and progress bar.</p>
+                    <label>Daily Target (ASIN Decisions):</label>
+                    <input type="number" id="target-input" value="${daily_target}" min="1">
+                    <label>Non-Productive Time (minutes):</label>
+                    <input type="number" id="nph-input" value="${non_productive_minutes}" min="0" max="480">
+                    <div class="dialog-buttons">
+                        <button class="cancel-btn">Cancel</button>
+                        <button class="save-btn">Save</button>
+                    </div>
+                </div>
+            </div>
+        `);
+
+        dialog.find(".cancel-btn").click(() => dialog.remove());
+        dialog.find(".save-btn").click(() => {
+            const newTarget = parseInt($('#target-input').val());
+            const newNPH = parseInt($('#nph-input').val());
+
+            if (newTarget > 0 && newNPH >= 0 && newNPH <= 480) {
+                daily_target = newTarget;
+                non_productive_minutes = newNPH;
+                saveData();
+                notified = false;
+                updateCombinedUI();
+                dialog.remove();
+            } else {
+                alert("Please enter valid values. Daily target must be > 0.");
+            }
+        });
+        $('body').append(dialog);
+    }
+
+    function getQuestionId() {
+        const h5 = document.querySelector('.task-queue-title h5');
+        if (!h5) return null;
+        const match = h5.textContent.match(/[a-f0-9]{32}/i);
+        return match ? match[0] : null;
+    }
+
+    function getAsinFromGrid(gridItem) {
+        const asinLink = gridItem.querySelector('a');
+        return asinLink ? asinLink.textContent.trim() : null;
+    }
+
+    async function saveLap() {
+        if (dayLogs.length < 5) {
+            dayLogs.push(decisionCount);
+        } else {
+            dayLogs.shift();
+            dayLogs.push(decisionCount);
+        }
+        await saveData();
+        updateCombinedUI();
+    }
+
+    async function restoreDecisions() {
+        const questionId = getQuestionId();
+        if (!questionId) return;
+        document.querySelectorAll('.label-map-grid-item').forEach(grid => {
+            const asin = getAsinFromGrid(grid);
+            const key = `${questionId}_${asin}`;
+            const decision = decisionMap[key];
+            if (decision) {
+                const buttons = grid.querySelectorAll('.label-map-label-button');
+                buttons.forEach(btn => btn.classList.remove('selected-button'));
+                for (const btn of buttons) {
+                    if (btn.textContent.trim() === decision.buttonText) {
+                        btn.classList.add('selected-button');
+                        grid.style.backgroundColor = 'rgba(0, 128, 0, 0.2)';
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    async function clearCount() {
+        if (!confirm("Are you sure you want to clear ALL ASIN decision counts and logs? This cannot be undone.")) {
+            return;
+        }
+        decisionCount = 0;
+        decisionMap = {};
+        dayLogs = [];
+        await saveData();
+        document.querySelectorAll('.label-map-grid-item').forEach(g => {
+            g.style.backgroundColor = '';
+            g.querySelectorAll('.label-map-label-button').forEach(btn => btn.classList.remove('selected-button'));
+        });
+        notified = false;
+        updateCombinedUI();
+    }
+
+    async function clearLastDay() {
+        if (dayLogs.length > 0) {
+            if (!confirm("Are you sure you want to clear the LAST day log entry?")) {
+                return;
+            }
+            dayLogs.pop();
+            await saveData();
+            updateCombinedUI();
+        } else {
+            alert("No day logs to clear.");
+        }
+    }
+
+    function downloadCSV() {
+        if (dayLogs.length === 0) {
+            alert("No day logs to download.");
+            return;
+        }
+        let csvContent = "data:text/csv;charset=utf-8,Day,ASINs Completed\n";
+        dayLogs.forEach((count, index) => {
+            csvContent += `Day ${index + 1},${count}\n`;
+        });
+        const total = dayLogs.reduce((sum, val) => sum + val, 0);
+        csvContent += `\nTotal,${total}\n`;
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement('a');
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", "asin_day_logs.csv");
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    function makeDraggable(elm) {
+        elm.onmousedown = function (e) {
+            let offsetX = e.clientX - elm.offsetLeft;
+            let offsetY = e.clientY - elm.offsetTop;
+            function mouseMove(e) {
+                elm.style.top = `${e.clientY - offsetY}px`;
+                elm.style.left = `${e.clientX - offsetX}px`;
+                elm.style.right = 'auto';
+            }
+            function stopDrag() {
+                document.removeEventListener('mousemove', mouseMove);
+                document.removeEventListener('mouseup', stopDrag);
+            }
+            document.addEventListener('mousemove', mouseMove);
+            document.addEventListener('mouseup', stopDrag);
+        };
+    }
+
+    async function handleDecisionClick(event) {
+        const btn = event.target.closest('.label-map-label-button');
+        if (!btn) return;
+        const gridItem = btn.closest('.label-map-grid-item');
+        const asin = getAsinFromGrid(gridItem);
+        const questionId = getQuestionId();
+        if (!asin || !questionId) return;
+        const key = `${questionId}_${asin}`;
+        const prevDecision = decisionMap[key] ? decisionMap[key].buttonText : null;
+
+        gridItem.querySelectorAll('.label-map-label-button').forEach(b => b.classList.remove('selected-button'));
+        btn.classList.add('selected-button');
+        gridItem.style.backgroundColor = 'rgba(0, 128, 0, 0.2)';
+        decisionMap[key] = { buttonText: btn.textContent.trim() };
+        if (prevDecision === null) {
+            decisionCount++;
+        }
+        await saveData();
+        updateCombinedUI();
+    }
+
+    function updateCombinedUI() {
+        const currentCount = decisionCount;
+        const target = getAdjustedTarget();
+        const progress = calculateProgress(currentCount);
+        let mainContainer = document.getElementById('asin-tracker-combined-container');
+        if (!mainContainer) {
+            mainContainer = document.createElement('div');
+            mainContainer.id = 'asin-tracker-combined-container';
+            mainContainer.innerHTML = `
+                <div id="asin-combined-header">
+                    <strong>ASIN Decisions:</strong> <span id="asin-decision-counter">${decisionCount}</span>
+                    <button id="toggle-details" class="header-button">Menu ▼</button>
+                </div>
+                <div class="progress-section">
+                    <div class="progress-info">
+                        <span class="progress-percentage">${progress}%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: ${progress}%;"></div>
+                    </div>
+                </div>
+                <div id="asin-menu-details" class="hidden-menu" style="display: none;">
+                    <div class="channel-info"><strong>Channel:</strong> ${currentChannelId}</div>
+                    <button id="settings-button" class="action-button settings">Settings</button>
+                    <button id="lap-button" class="action-button default">Record Day Log</button>
+                    <button id="restore-button" class="action-button default">Restore Decisions</button>
+                    <button id="clear-count" class="action-button danger">Clear All Count</button>
+                    <button id="clear-last-day" class="action-button warning default">Clear Last Day Log</button>
+                    <button id="download-days" class="action-button success">Download CSV</button>
+                    <button id="toggle-days" class="action-button default">Show/Hide Day Logs</button>
+                    <div id="day-logs" style="display: none; margin-top: 8px;"></div>
+                </div>`;
+
+            Object.assign(mainContainer.style, {
+                position: 'fixed',
+                top: '20px',
+                right: '20px',
+                zIndex: '9999',
+                background: 'rgba(255, 255, 255, 0.95)',
+                color: '#333',
+                padding: '6px', // Modified
+                borderRadius: '6px', // Modified
+                boxShadow: '0 1px 3px rgba(0,0,0,0.1)', // Modified
+                maxWidth: '260px', // Modified
+                cursor: 'grab',
+                fontFamily: 'Arial, Helvetica, sans-serif' // Changed font
+            });
+            document.body.appendChild(mainContainer);
+            makeDraggable(mainContainer);
+
+            document.getElementById('toggle-details').onclick = () => {
+                const details = document.getElementById('asin-menu-details');
+                const toggleButton = document.getElementById('toggle-details');
+                if (details.style.display === 'none') {
+                    details.style.display = 'block';
+                    toggleButton.textContent = 'Menu ▲';
+                } else {
+                    details.style.display = 'none';
+                    toggleButton.textContent = 'Menu ▼';
+                }
+            };
+            document.getElementById('settings-button').onclick = openSettingsDialog;
+            document.getElementById('lap-button').onclick = saveLap;
+            document.getElementById('restore-button').onclick = restoreDecisions;
+            document.getElementById('clear-count').onclick = clearCount;
+            document.getElementById('clear-last-day').onclick = clearLastDay;
+            document.getElementById('toggle-days').onclick = () => {
+                const logDiv = document.getElementById('day-logs');
+                logDiv.style.display = logDiv.style.display === 'none' ? 'block' : 'none';
+            };
+            document.getElementById('download-days').onclick = downloadCSV;
+        }
+
+        document.getElementById('asin-decision-counter').textContent = decisionCount;
+        updateDayLogs();
+
+        const progressPercentage = mainContainer.querySelector(".progress-percentage");
+        const progressFill = mainContainer.querySelector(".progress-fill");
+
+        progressPercentage.textContent = `${progress}%`;
+        progressFill.style.width = `${progress}%`;
+        // progressFill.style.backgroundColor set in CSS
+        
+        if (progress >= 100 && !notified) {
+            notified = true;
+            alert("🎉 Congratulations! You've reached your target!");
+        }
+    }
+
+    function updateDayLogs() {
+        const logContainer = document.getElementById('day-logs');
+        if (!logContainer) return;
+        logContainer.innerHTML = '';
+        if (dayLogs.length === 0) {
+            logContainer.innerHTML = '<div style="color: #777; text-align: center; padding: 5px 0; font-size: 12px;">No day logs.</div>';
+            return;
+        }
+        for (let i = 0; i < dayLogs.length; i++) {
+            const day = document.createElement('div');
+            day.textContent = `Day ${i + 1}: ${dayLogs[i] || 0}`;
+            day.style.cssText = `
+                padding: 4px 0;
+                border-bottom: 1px dashed #EEE;
+                color: #555;
+                font-size: 12px;
+            `;
+            logContainer.appendChild(day);
+        }
+        if (logContainer.lastChild) {
+             logContainer.lastChild.style.borderBottom = 'none';
+        }
+    }
+
+    GM_addValueChangeListener('asinDecisionMap', (n, o, val) => {
+        decisionMap = JSON.parse(val);
+        updateCombinedUI();
+    });
+    GM_addValueChangeListener('asinDecisionCount', (n, o, val) => {
+        decisionCount = parseInt(val);
+        updateCombinedUI();
+    });
+    GM_addValueChangeListener('asinDayLogs', (n, o, val) => {
+        dayLogs = JSON.parse(val);
+        updateCombinedUI();
+    });
+    GM_addValueChangeListener('daily_target', (n, o, val) => {
+        daily_target = parseInt(val);
+        updateCombinedUI();
+    });
+    GM_addValueChangeListener('non_productive_minutes', (n, o, val) => {
+        non_productive_minutes = parseInt(val);
+        updateCombinedUI();
+    });
+
+    GM_addStyle(`
+        #asin-tracker-combined-container {
+            font-family: Arial, Helvetica, sans-serif; /* Changed font */
+            font-size: 13px; /* Base font size for container */
+            padding: 6px;
+            border-radius: 6px;
+        }
+        .selected-button { /* For ASIN grid selection, not UI buttons */
+            outline: 3px solid #28a745 !important; /* Green highlight */
+        }
+
+        /* --- General Button Styling --- */
+        #asin-tracker-combined-container button {
+            border-radius: 4px; /* Softer radius */
+            padding: 6px 10px; /* Compact padding */
+            margin: 3px 0; /* Compact margin */
+            font-size: 12px; /* Smaller font for action buttons */
+            cursor: pointer;
+            width: 100%;
+            text-align: center;
+            display: block;
+            box-sizing: border-box;
+            transition: background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+        }
+        #asin-tracker-combined-container button:hover {
+            opacity: 0.85;
+        }
+
+        /* --- Header Styling --- */
+        #asin-combined-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 4px; /* Modified */
+            margin-bottom: 4px; /* Modified */
+            border-bottom: 1px solid #EEEEEE;
+            color: #5A5A5A; /* Primary gray accent */
+            font-size: 14px; /* Base for "ASIN Decisions:" label */
+        }
+        #asin-combined-header strong {
+             font-weight: 600; /* Slightly less heavy than default bold */
+        }
+        #toggle-details.header-button { /* Menu Button */
+            background-color: #6c757d; /* Bootstrap secondary gray */
+            color: white;
+            border: none;
+            padding: 4px 8px; /* Modified */
+            font-size: 11px; /* Modified */
+            min-width: 60px; /* Adjusted */
+            width: auto;
+            box-shadow: none;
+        }
+        #toggle-details.header-button:hover {
+            background-color: #5a6268;
+            opacity: 1;
+        }
+        #asin-decision-counter {
+            font-size: 16px; /* Modified */
+            color: #333333; /* Darker for count */
+            font-weight: 600;
+            margin-left: 4px;
+        }
+
+        /* --- Progress Section Styling --- */
+        .progress-section {
+            background: #F8F9FA; /* Lighter gray */
+            padding: 5px 6px; /* Modified */
+            border-radius: 5px; /* Modified */
+            margin-bottom: 6px; /* Modified */
+        }
+        .progress-info {
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            margin-bottom: 3px; /* Modified */
+        }
+        .progress-percentage {
+            font-size: 11px; /* Modified */
+            color: #5A5A5A;
+        }
+        .progress-bar {
+            height: 6px; /* Modified */
+            background-color: #E9ECEF; /* Light gray track */
+            border-radius: 3px; /* Modified */
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background-color: #5A5A5A; /* Primary gray accent */
+            border-radius: 3px; /* Modified */
+            transition: width 0.4s ease-in-out;
+        }
+
+        /* --- Menu Details & Action Buttons Styling --- */
+        #asin-menu-details {
+            padding-top: 6px;
+            border-top: 1px solid #EEEEEE;
+            margin-top: 6px;
+        }
+        .action-button {
+            border: 1px solid #CED4DA; /* Default border */
+            background-color: #F8F9FA; /* Default light background */
+            color: #333333; /* Default text color */
+            box-shadow: none;
+        }
+        .action-button:hover {
+            background-color: #E9ECEF; /* Slightly darker on hover */
+            border-color: #ADB5BD;
+            opacity: 1;
+        }
+        .action-button.settings { /* Example of a slightly more prominent default button */
+             background-color: #6c757d; /* Bootstrap secondary gray */
+             color: white;
+             border-color: #6c757d;
+        }
+        .action-button.settings:hover {
+             background-color: #5a6268;
+             border-color: #545b62;
+        }
+        .action-button.danger {
+            background-color: #DC3545; /* Muted Red */
+            color: white;
+            border: none;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.07);
+        }
+        .action-button.danger:hover {
+            background-color: #C82333;  opacity: 1;
+        }
+        .action-button.success {
+            background-color: #28A745; /* Muted Green */
+            color: white;
+            border: none;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.07);
+        }
+        .action-button.success:hover {
+            background-color: #218838;  opacity: 1;
+        }
+        /* .action-button.warning can use default style or its own */
+        .action-button.warning {
+            background-color: #FFC107; color: #212529; border: none;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.07);
+        }
+        .action-button.warning:hover {
+            background-color: #E0A800; opacity:1;
+        }
+
+
+        /* --- Day Logs Styling --- */
+        #day-logs div {
+            padding: 4px 0; /* Compact */
+            border-bottom: 1px dashed #EEEEEE;
+            color: #555555;
+            font-size: 12px; /* Compact */
+            text-align: left;
+        }
+        #day-logs div:last-child {
+            border-bottom: none;
+        }
+        .channel-info {
+            padding: 4px 0 8px;
+            color: #6c757d;
+            font-size: 11px; /* Compact */
+            border-bottom: 1px solid #EEEEEE;
+            margin-bottom: 8px;
+            text-align: center;
+        }
+
+        /* --- Settings Dialog Styling (Minimal Changes for consistency) --- */
+        .custom-dialog-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.4); /* Slightly lighter backdrop */
+            display: flex; justify-content: center; align-items: center;
+            z-index: 10000;
+        }
+        .custom-dialog-overlay .dialog-content {
+            background: #FFFFFF;
+            padding: 20px; /* Slightly more compact */
+            border-radius: 6px;
+            width: 320px; /* Slightly smaller */
+            box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+            font-family: Arial, Helvetica, sans-serif; /* Changed font */
+            color: #333333;
+        }
+        .custom-dialog-overlay .dialog-title {
+            margin: 0 0 15px;
+            font-size: 18px; /* Compact */
+            color: #5A5A5A; /* Primary gray accent */
+            border-bottom: 1px solid #EEEEEE;
+            padding-bottom: 8px;
+        }
+        .custom-dialog-overlay p {
+            font-size: 12px; /* Compact */
+            color: #666666;
+            margin-bottom: 12px;
+        }
+        .custom-dialog-overlay label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 600;
+            color: #444444;
+            font-size: 12px;
+        }
+        .custom-dialog-overlay input[type="number"] {
+            width: calc(100% - 16px); /* Adjusted for padding */
+            padding: 8px; /* Compact */
+            margin-bottom: 15px;
+            border: 1px solid #CED4DA;
+            border-radius: 4px;
+            font-size: 13px;
+            box-sizing: border-box;
+        }
+        .custom-dialog-overlay .dialog-buttons {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px; /* Compact gap */
+            margin-top: 15px;
+        }
+        .custom-dialog-overlay .dialog-buttons button {
+            padding: 8px 15px; /* Compact */
+            font-size: 13px; /* Compact */
+            border-radius: 4px;
+            cursor: pointer;
+            width: auto;
+            box-shadow: none;
+        }
+        .custom-dialog-overlay .dialog-buttons .cancel-btn {
+            background: #E9ECEF;
+            color: #333333;
+            border: 1px solid #CED4DA;
+        }
+        .custom-dialog-overlay .dialog-buttons .cancel-btn:hover {
+            background: #DEE2E6; border-color: #ADB5BD;
+        }
+        .custom-dialog-overlay .dialog-buttons .save-btn {
+            background: #5A5A5A; /* Primary gray accent */
+            color: white;
+            border: none; /* No border for primary action */
+        }
+        .custom-dialog-overlay .dialog-buttons .save-btn:hover {
+            background: #4A4A4A;
+        }
+    `);
+
+    document.addEventListener('click', handleDecisionClick, true);
+    waitForKeyElements("div.task-queue-right", loadData);
+})();
+
