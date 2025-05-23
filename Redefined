@@ -1,4 +1,16 @@
-
+Okay, I've refined the UI styling of the UserScript to make it more compact, visually pleasing, and less distracting, aligning with your request for it to be "small in the corner."
+The core functionality and the overall layout (minimal information visible by default, with a menu for more options) remain the same as this structure is already efficient. The changes primarily focus on adjusting padding, font sizes, and element heights within the CSS to reduce the overall footprint of the draggable UI, especially when it's collapsed.
+Here's a summary of the refinements:
+ * Reduced Container Padding: The main container now has slightly less padding.
+ * More Compact Header:
+   * The font size of the "ASIN Decisions" count has been slightly reduced.
+   * Padding and margins within the header section have been tightened.
+ * Slimmer Progress Section:
+   * Padding within the progress bar area has been reduced.
+   * The margin below the progress text has been decreased.
+   * The progress bar itself is now slightly thinner, with corresponding adjustments to its border radius.
+These adjustments make the UI element take up less vertical space, enhancing its "small in the corner" feel without sacrificing the clarity of the essential information. The color scheme and overall aesthetic remain consistent with the previous "sleek" design.
+Here is the updated script with the refined CSS:
 // ==UserScript==
 // @name ASIN Counter and Decision Tracker
 // @namespace combined_asin_tools
@@ -442,4 +454,121 @@
             background-color: #e0e0e0; /* */
             border-radius: 4px; /* Modified */
             overflow: hidden; /* */
-            box-shadow: inset 0 1px 3px rgba(0,0,0,
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.1); /* */
+        }
+        .progress-fill {
+            height: 100%; /* */
+            background-color: #9b59b6; /* */
+            border-radius: 4px; /* Modified */
+            transition: width 0.6s ease-in-out, background-color 0.3s ease; /* */
+        }
+        #asin-menu-details {
+            padding-top: 10px; /* */
+            border-top: 1px solid #eee; /* */
+            margin-top: 10px; /* */
+        }
+        .action-button.primary { background-color: #9b59b6; }    /* */
+        .action-button.info { background-color: #3498db; }       /* */
+        .action-button.restore { background-color: #8e44ad; }    /* */
+        .action-button.danger { background-color: #e74c3c; }     /* */
+        .action-button.warning { background-color: #f39c12; }    /* */
+        .action-button.success { background-color: #27ae60; }    /* */
+        .action-button.secondary { background-color: #7f8c8d; }  /* */
+        #day-logs div {
+            padding: 5px 0; /* */
+            border-bottom: 1px dashed #eee; /* */
+            color: #555; /* */
+            text-align: left; /* */
+        }
+        #day-logs div:last-child {
+            border-bottom: none; /* */
+        }
+        .channel-info {
+            padding: 5px 0 10px; /* */
+            color: #666; /* */
+            font-size: 13px; /* */
+            border-bottom: 1px solid #eee; /* */
+            margin-bottom: 10px; /* */
+            text-align: center; /* */
+        }
+        .custom-dialog-overlay {
+            position: fixed; /* */
+            top: 0; left: 0; right: 0; bottom: 0; /* */
+            background: rgba(0,0,0,0.5); /* */
+            display: flex; /* */
+            justify-content: center; /* */
+            align-items: center; /* */
+            z-index: 10000; /* */
+        }
+        .custom-dialog-overlay .dialog-content {
+            background: #fff; /* */
+            padding: 25px; /* */
+            border-radius: 10px; /* */
+            width: 350px; /* */
+            box-shadow: 0 8px 25px rgba(0,0,0,0.3); /* */
+            font-family: '"Segoe UI", Tahoma, Geneva, Verdana, sans-serif'; /* */
+            color: #333; /* */
+        }
+        .custom-dialog-overlay .dialog-title {
+            margin: 0 0 20px; /* */
+            font-size: 20px; /* */
+            color: #6a11cb; /* */
+            border-bottom: 1px solid #eee; /* */
+            padding-bottom: 10px; /* */
+        }
+        .custom-dialog-overlay p {
+            font-size: 13px; /* */
+            color: #777; /* */
+            margin-bottom: 15px; /* */
+        }
+        .custom-dialog-overlay label {
+            display: block; /* */
+            margin-bottom: 8px; /* */
+            font-weight: 500; /* */
+            color: #555; /* */
+        }
+        .custom-dialog-overlay input[type="number"] {
+            width: calc(100% - 20px); /* */
+            padding: 10px; /* */
+            margin-bottom: 18px; /* */
+            border: 1px solid #ddd; /* */
+            border-radius: 5px; /* */
+            font-size: 14px; /* */
+            box-sizing: border-box; /* */
+        }
+        .custom-dialog-overlay .dialog-buttons {
+            display: flex; /* */
+            justify-content: flex-end; /* */
+            gap: 10px; /* */
+            margin-top: 20px; /* */
+        }
+        .custom-dialog-overlay .dialog-buttons button {
+            padding: 10px 18px; /* */
+            border: none; /* */
+            border-radius: 6px; /* */
+            font-size: 14px; /* */
+            cursor: pointer; /* */
+            transition: background-color 0.2s ease; /* */
+            width: auto; /* */
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1); /* */
+        }
+        .custom-dialog-overlay .dialog-buttons .cancel-btn {
+            background: #e0e0e0; /* */
+            color: #555; /* */
+        }
+        .custom-dialog-overlay .dialog-buttons .cancel-btn:hover {
+            background: #d0d0d0; /* */
+        }
+        .custom-dialog-overlay .dialog-buttons .save-btn {
+            background: #9b59b6; /* */
+            color: white; /* */
+        }
+        .custom-dialog-overlay .dialog-buttons .save-btn:hover {
+            background: #8e44ad; /* */
+        }
+    `);
+
+    document.addEventListener('click', handleDecisionClick, true);
+    waitForKeyElements("div.task-queue-right", loadData); //
+})();
+
