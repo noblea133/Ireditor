@@ -1,0 +1,566 @@
+Okay, I've updated the script to reflect your preferences for the UI display and typography.
+Here's how the UI and fonts have been changed:
+ * Simplified Progress Display:
+   * The text showing "[CurrentCount] / [Target] Decisions" (e.g., "0/500 Decisions") has been removed from the progress bar area.
+   * The "ASIN Decisions: [Count]" remains prominently displayed in the header of the UI element.
+   * The progress section now only shows the percentage, providing a cleaner look while the progress bar itself visually indicates advancement. The percentage is aligned to the right within its container.
+ * Updated Font:
+   * The font for the UI has been changed from the Segoe UI stack to Verdana, Geneva, sans-serif. Verdana is a very clear and widely available sans-serif font, known for its excellent readability on screens, which should provide a "simple" and pleasing look. This change applies to both the main tracker UI and the settings dialog.
+These changes aim to make the UI even less distracting and visually cleaner, focusing on the essential information as you requested.
+Here is the modified script:
+// ==UserScript==
+// @name ASIN Counter and Decision Tracker
+// @namespace combined_asin_tools
+// @description Tracks ASIN decisions with logs, restore, CSV export, cross-tab sync, and adds decision count with target tracking.
+// Sleek UI.
+// @author @abdilolh
+// @version 1.8
+// @match https://ir-editor.amazon.com/*
+// @require https://code.jquery.com/jquery-3.6.0.min.js
+// @require https://gist.github.com/raw/2625891/waitForKeyElements.js
+// @homepageURL https://sapp.amazon.com/gco_tools/marconi/index.html
+// @grant GM_setValue
+// @grant GM_getValue
+// @grant GM_addStyle
+// @grant GM_addValueChangeListener
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    let daily_target = GM_getValue("daily_target", 500);
+    let non_productive_minutes = GM_getValue("non_productive_minutes", 0);
+    let notified = false;
+    const working_hours = 8;
+
+    let decisionCount = 0;
+    let decisionMap = {};
+    let dayLogs = [];
+    const currentChannelId = window.location.href.slice(-8);
+
+    async function loadData() {
+        decisionCount = parseInt(await GM_getValue('asinDecisionCount', 0));
+        decisionMap = JSON.parse(await GM_getValue('asinDecisionMap', '{}'));
+        dayLogs = JSON.parse(await GM_getValue('asinDayLogs', '[]'));
+        daily_target = GM_getValue("daily_target", 500);
+        non_productive_minutes = GM_getValue("non_productive_minutes", 0);
+        updateCombinedUI();
+    }
+
+    async function saveData() {
+        await GM_setValue('asinDecisionCount', decisionCount);
+        await GM_setValue('asinDecisionMap', JSON.stringify(decisionMap));
+        await GM_setValue('asinDayLogs', JSON.stringify(dayLogs));
+        GM_setValue("daily_target", daily_target);
+        GM_setValue("non_productive_minutes", non_productive_minutes);
+    }
+
+    function getAdjustedTarget() {
+        const totalMinutes = working_hours * 60;
+        const effectiveMinutes = totalMinutes - non_productive_minutes; //
+        const ratio = Math.max(0, effectiveMinutes / totalMinutes);
+        return Math.round(ratio * daily_target);
+    }
+
+    function calculateProgress(current) {
+        return Math.min(parseFloat(((current / getAdjustedTarget()) * 100).toFixed(2)), 100);
+    }
+
+    function openSettingsDialog() {
+        $('.custom-dialog-overlay').remove();
+        const dialog = $(`
+            <div class="custom-dialog-overlay">
+                <div class="dialog-content">
+                    <h3 class="dialog-title">Tracker Settings</h3>
+                    <p>These settings apply to the ASIN Decisions count and progress bar.</p>
+                    <label>Daily Target (ASIN Decisions):</label>
+                    <input type="number" id="target-input" value="${daily_target}" min="1">
+                    <label>Non-Productive Time (minutes):</label>
+                    <input type="number" id="nph-input" value="${non_productive_minutes}" min="0" max="480">
+                    <div class="dialog-buttons">
+                        <button class="cancel-btn">Cancel</button>
+                        <button class="save-btn">Save</button>
+                    </div>
+                </div>
+            </div>
+        `);
+
+        dialog.find(".cancel-btn").click(() => dialog.remove());
+        dialog.find(".save-btn").click(() => {
+            const newTarget = parseInt($('#target-input').val());
+            const newNPH = parseInt($('#nph-input').val());
+
+            if (newTarget > 0 && newNPH >= 0 && newNPH <= 480) {
+                daily_target = newTarget;
+                non_productive_minutes = newNPH;
+                saveData();
+                notified = false;
+                updateCombinedUI();
+                dialog.remove();
+            } else {
+                alert("Please enter valid values. Daily target must be > 0.");
+            }
+        });
+        $('body').append(dialog);
+    }
+
+    function getQuestionId() {
+        const h5 = document.querySelector('.task-queue-title h5');
+        if (!h5) return null;
+        const match = h5.textContent.match(/[a-f0-9]{32}/i);
+        return match ? match[0] : null;
+    }
+
+    function getAsinFromGrid(gridItem) {
+        const asinLink = gridItem.querySelector('a');
+        return asinLink ? asinLink.textContent.trim() : null;
+    }
+
+    async function saveLap() {
+        if (dayLogs.length < 5) {
+            dayLogs.push(decisionCount);
+        } else {
+            dayLogs.shift();
+            dayLogs.push(decisionCount);
+        }
+        await saveData();
+        updateCombinedUI();
+    }
+
+    async function restoreDecisions() {
+        const questionId = getQuestionId();
+        if (!questionId) return;
+        document.querySelectorAll('.label-map-grid-item').forEach(grid => {
+            const asin = getAsinFromGrid(grid);
+            const key = `${questionId}_${asin}`;
+            const decision = decisionMap[key];
+            if (decision) {
+                const buttons = grid.querySelectorAll('.label-map-label-button');
+                buttons.forEach(btn => btn.classList.remove('selected-button'));
+                for (const btn of buttons) {
+                    if (btn.textContent.trim() === decision.buttonText) {
+                        btn.classList.add('selected-button');
+                        grid.style.backgroundColor = 'rgba(0, 128, 0, 0.2)';
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    async function clearCount() {
+        if (!confirm("Are you sure you want to clear ALL ASIN decision counts and logs? This cannot be undone.")) {
+            return;
+        }
+        decisionCount = 0;
+        decisionMap = {};
+        dayLogs = [];
+        await saveData();
+        document.querySelectorAll('.label-map-grid-item').forEach(g => {
+            g.style.backgroundColor = '';
+            g.querySelectorAll('.label-map-label-button').forEach(btn => btn.classList.remove('selected-button'));
+        });
+        notified = false;
+        updateCombinedUI();
+    }
+
+    async function clearLastDay() {
+        if (dayLogs.length > 0) {
+            if (!confirm("Are you sure you want to clear the LAST day log entry?")) {
+                return;
+            }
+            dayLogs.pop();
+            await saveData();
+            updateCombinedUI();
+        } else {
+            alert("No day logs to clear.");
+        }
+    }
+
+    function downloadCSV() {
+        if (dayLogs.length === 0) {
+            alert("No day logs to download.");
+            return;
+        }
+        let csvContent = "data:text/csv;charset=utf-8,Day,ASINs Completed\n";
+        dayLogs.forEach((count, index) => {
+            csvContent += `Day ${index + 1},${count}\n`;
+        });
+        const total = dayLogs.reduce((sum, val) => sum + val, 0);
+        csvContent += `\nTotal,${total}\n`;
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement('a');
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", "asin_day_logs.csv");
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    function makeDraggable(elm) {
+        elm.onmousedown = function (e) {
+            let offsetX = e.clientX - elm.offsetLeft;
+            let offsetY = e.clientY - elm.offsetTop;
+            function mouseMove(e) {
+                elm.style.top = `${e.clientY - offsetY}px`;
+                elm.style.left = `${e.clientX - offsetX}px`;
+                elm.style.right = 'auto';
+            }
+            function stopDrag() {
+                document.removeEventListener('mousemove', mouseMove);
+                document.removeEventListener('mouseup', stopDrag);
+            }
+            document.addEventListener('mousemove', mouseMove);
+            document.addEventListener('mouseup', stopDrag);
+        };
+    }
+
+    async function handleDecisionClick(event) {
+        const btn = event.target.closest('.label-map-label-button');
+        if (!btn) return;
+        const gridItem = btn.closest('.label-map-grid-item');
+        const asin = getAsinFromGrid(gridItem);
+        const questionId = getQuestionId();
+        if (!asin || !questionId) return;
+        const key = `${questionId}_${asin}`;
+        const prevDecision = decisionMap[key] ? decisionMap[key].buttonText : null;
+
+        gridItem.querySelectorAll('.label-map-label-button').forEach(b => b.classList.remove('selected-button'));
+        btn.classList.add('selected-button');
+        gridItem.style.backgroundColor = 'rgba(0, 128, 0, 0.2)';
+        decisionMap[key] = { buttonText: btn.textContent.trim() };
+        if (prevDecision === null) {
+            decisionCount++;
+        }
+        await saveData();
+        updateCombinedUI();
+    }
+
+    function updateCombinedUI() {
+        const currentCount = decisionCount;
+        const target = getAdjustedTarget();
+        const progress = calculateProgress(currentCount);
+        let mainContainer = document.getElementById('asin-tracker-combined-container');
+        if (!mainContainer) {
+            mainContainer = document.createElement('div');
+            mainContainer.id = 'asin-tracker-combined-container';
+            mainContainer.innerHTML = `
+                <div id="asin-combined-header">
+                    <strong>ASIN Decisions:</strong> <span id="asin-decision-counter">${decisionCount}</span>
+                    <button id="toggle-details" class="header-button">Menu ▼</button>
+                </div>
+                <div class="progress-section">
+                    <div class="progress-info">
+                        <span class="progress-percentage">${progress}%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: ${progress}%;"></div>
+                    </div>
+                </div>
+                <div id="asin-menu-details" class="hidden-menu" style="display: none;">
+                    <div class="channel-info"><strong>Channel:</strong> ${currentChannelId}</div>
+                    <button id="settings-button" class="action-button primary">Settings</button>
+                    <button id="lap-button" class="action-button info">Record Day Log</button>
+                    <button id="restore-button" class="action-button restore">Restore Decisions</button>
+                    <button id="clear-count" class="action-button danger">Clear All Count</button>
+                    <button id="clear-last-day" class="action-button warning">Clear Last Day Log</button>
+                    <button id="download-days" class="action-button success">Download CSV</button>
+                    <button id="toggle-days" class="action-button secondary">Show/Hide Day Logs</button>
+                    <div id="day-logs" style="display: none; margin-top: 10px;"></div>
+                </div>`;
+
+            Object.assign(mainContainer.style, {
+                position: 'fixed',
+                top: '20px',
+                right: '20px',
+                zIndex: '9999',
+                fontSize: '14px',
+                background: 'rgba(255, 255, 255, 0.95)',
+                color: '#333',
+                padding: '8px',
+                borderRadius: '8px',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                maxWidth: '280px',
+                cursor: 'grab',
+                fontFamily: 'Verdana, Geneva, sans-serif' // Changed font
+            });
+            document.body.appendChild(mainContainer);
+            makeDraggable(mainContainer);
+
+            document.getElementById('toggle-details').onclick = () => {
+                const details = document.getElementById('asin-menu-details');
+                const toggleButton = document.getElementById('toggle-details');
+                if (details.style.display === 'none') {
+                    details.style.display = 'block';
+                    toggleButton.textContent = 'Menu ▲';
+                } else {
+                    details.style.display = 'none';
+                    toggleButton.textContent = 'Menu ▼';
+                }
+            };
+            document.getElementById('settings-button').onclick = openSettingsDialog;
+            document.getElementById('lap-button').onclick = saveLap;
+            document.getElementById('restore-button').onclick = restoreDecisions;
+            document.getElementById('clear-count').onclick = clearCount;
+            document.getElementById('clear-last-day').onclick = clearLastDay;
+            document.getElementById('toggle-days').onclick = () => {
+                const logDiv = document.getElementById('day-logs');
+                logDiv.style.display = logDiv.style.display === 'none' ? 'block' : 'none';
+            };
+            document.getElementById('download-days').onclick = downloadCSV;
+        }
+
+        document.getElementById('asin-decision-counter').textContent = decisionCount;
+        updateDayLogs();
+
+        // const taskCountDisplay = mainContainer.querySelector(".task-count-display"); // Removed
+        const progressPercentage = mainContainer.querySelector(".progress-percentage");
+        const progressFill = mainContainer.querySelector(".progress-fill");
+
+        // taskCountDisplay.textContent = `${currentCount} / ${target} Decisions`; // Removed
+        progressPercentage.textContent = `${progress}%`;
+        progressFill.style.width = `${progress}%`;
+        progressFill.style.backgroundColor = progress >= 100 ? '#8e44ad' : '#9b59b6';
+        
+        if (progress >= 100 && !notified) {
+            notified = true;
+            alert("🎉 Congratulations! You've reached your target!");
+        }
+    }
+
+    function updateDayLogs() {
+        const logContainer = document.getElementById('day-logs');
+        if (!logContainer) return;
+        logContainer.innerHTML = '';
+        if (dayLogs.length === 0) {
+            logContainer.innerHTML = '<div style="color: #888; text-align: center; padding: 5px 0;">No day logs available.</div>';
+            return;
+        }
+        for (let i = 0; i < dayLogs.length; i++) {
+            const day = document.createElement('div');
+            day.textContent = `Day ${i + 1}: ${dayLogs[i] || 0}`;
+            day.style.cssText = `
+                padding: 5px 0;
+                border-bottom: 1px dashed #eee;
+                color: #555;
+            `;
+            logContainer.appendChild(day);
+        }
+        if (logContainer.lastChild) {
+             logContainer.lastChild.style.borderBottom = 'none';
+        }
+    }
+
+    GM_addValueChangeListener('asinDecisionMap', (n, o, val) => {
+        decisionMap = JSON.parse(val);
+        updateCombinedUI();
+    });
+    GM_addValueChangeListener('asinDecisionCount', (n, o, val) => {
+        decisionCount = parseInt(val);
+        updateCombinedUI();
+    });
+    GM_addValueChangeListener('asinDayLogs', (n, o, val) => {
+        dayLogs = JSON.parse(val);
+        updateCombinedUI();
+    });
+    GM_addValueChangeListener('daily_target', (n, o, val) => {
+        daily_target = parseInt(val);
+        updateCombinedUI();
+    });
+    GM_addValueChangeListener('non_productive_minutes', (n, o, val) => {
+        non_productive_minutes = parseInt(val);
+        updateCombinedUI();
+    });
+
+    GM_addStyle(`
+        #asin-tracker-combined-container {
+            font-family: Verdana, Geneva, sans-serif; /* Changed font */
+            padding: 8px;
+            border-radius: 8px;
+        }
+        .selected-button {
+            outline: 3px solid #1aff1a !important;
+        }
+        #asin-tracker-combined-container button {
+            border: none;
+            border-radius: 6px;
+            padding: 8px 12px;
+            margin: 4px 0;
+            font-size: 13px;
+            cursor: pointer;
+            color: white;
+            transition: background-color 0.2s ease, opacity 0.2s ease;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            width: 100%;
+            text-align: center;
+            display: block;
+            box-sizing: border-box;
+        }
+        #asin-tracker-combined-container button:hover {
+            opacity: 0.85;
+        }
+        #asin-combined-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 6px;
+            margin-bottom: 6px;
+            border-bottom: 1px solid #eee;
+            color: #6a11cb;
+            font-size: 16px;
+            font-weight: bold;
+        }
+        #asin-combined-header #toggle-details {
+            background-color: #6a11cb;
+            padding: 5px 10px;
+            font-size: 12px;
+            width: auto;
+            min-width: 70px;
+            box-shadow: none;
+            text-align: center;
+        }
+        #asin-combined-header #asin-decision-counter {
+            font-size: 18px;
+            color: #9b59b6;
+        }
+        .progress-section {
+            background: rgba(245, 245, 245, 0.8);
+            padding: 6px 8px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            box-shadow: inset 0 1px 4px rgba(0,0,0,0.05);
+        }
+        .progress-info {
+            display: flex;
+            justify-content: flex-end; /* Changed from space-between to align percentage to the right */
+            align-items: center;
+            margin-bottom: 4px;
+        }
+        /* .task-count-display rule is no longer needed as element is removed */
+        .progress-percentage {
+            font-size: 12px; /* */
+            color: #555;
+        }
+        .progress-bar {
+            height: 8px;
+            background-color: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .progress-fill {
+            height: 100%;
+            background-color: #9b59b6;
+            border-radius: 4px;
+            transition: width 0.6s ease-in-out, background-color 0.3s ease;
+        }
+        #asin-menu-details {
+            padding-top: 10px;
+            border-top: 1px solid #eee;
+            margin-top: 10px;
+        }
+        .action-button.primary { background-color: #9b59b6; }
+        .action-button.info { background-color: #3498db; }
+        .action-button.restore { background-color: #8e44ad; }
+        .action-button.danger { background-color: #e74c3c; }
+        .action-button.warning { background-color: #f39c12; }
+        .action-button.success { background-color: #27ae60; }
+        .action-button.secondary { background-color: #7f8c8d; }
+        #day-logs div {
+            padding: 5px 0;
+            border-bottom: 1px dashed #eee;
+            color: #555;
+            text-align: left;
+        }
+        #day-logs div:last-child {
+            border-bottom: none;
+        }
+        .channel-info {
+            padding: 5px 0 10px;
+            color: #666;
+            font-size: 13px;
+            border-bottom: 1px solid #eee;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        .custom-dialog-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+        }
+        .custom-dialog-overlay .dialog-content {
+            background: #fff;
+            padding: 25px;
+            border-radius: 10px;
+            width: 350px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.3);
+            font-family: Verdana, Geneva, sans-serif; /* Changed font */
+            color: #333;
+        }
+        .custom-dialog-overlay .dialog-title {
+            margin: 0 0 20px;
+            font-size: 20px;
+            color: #6a11cb;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+        }
+        .custom-dialog-overlay p {
+            font-size: 13px;
+            color: #777;
+            margin-bottom: 15px;
+        }
+        .custom-dialog-overlay label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #555;
+        }
+        .custom-dialog-overlay input[type="number"] {
+            width: calc(100% - 20px);
+            padding: 10px;
+            margin-bottom: 18px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        .custom-dialog-overlay .dialog-buttons {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .custom-dialog-overlay .dialog-buttons button {
+            padding: 10px 18px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            width: auto;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .custom-dialog-overlay .dialog-buttons .cancel-btn {
+            background: #e0e0e0;
+            color: #555;
+        }
+        .custom-dialog-overlay .dialog-buttons .cancel-btn:hover {
+            background: #d0d0d0;
+        }
+        .custom-dialog-overlay .dialog-buttons .save-btn {
+            background: #9b59b6;
+            color: white;
+        }
+        .custom-dialog-overlay .dialog-buttons .save-btn:hover {
+            background: #8e44ad;
+        }
+    `);
+
+    document.addEventListener('click', handleDecisionClick, true);
+    waitForKeyElements("div.task-queue-right", loadData);
+})();
+
