@@ -1,17 +1,4 @@
 
-Okay, I'll modify the script to display "ASINs done / target" inside the menu, right after the channel information.
-Here's how I'll implement this:
- * Update IDS: Add a new ID for the div that will display this information.
- * Modify createMenuDetailsHTML:
-   * This function will now accept decisionCount and adjustedTarget as parameters.
-   * A new div with the ID IDS.ASIN_TARGET_STATUS_DISPLAY and class asin-target-status will be added right after the channel-info div. It will display the text "ASINs: [done] / [target]".
- * Update uiElements: Add asinTargetStatusDisplay: null to cache this new DOM element.
- * Adjust updateCombinedUI:
-   * When calling createMenuDetailsHTML during the initial setup, pass the current decisionCount and adjustedTarget.
-   * Cache the asinTargetStatusDisplay element in uiElements after the initial UI creation.
-   * In the section of updateCombinedUI that runs on every update, refresh the textContent of uiElements.asinTargetStatusDisplay with the latest decisionCount and adjustedTarget.
- * Add CSS: Include styling for the new .asin-target-status class within the GM_addStyle block for consistent formatting.
-Here's the updated code:
 // ==UserScript==
 // @name ASIN Counter and Decision Tracker
 // @namespace combined_asin_tools
