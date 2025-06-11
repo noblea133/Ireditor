@@ -1,0 +1,653 @@
+// ==UserScript==
+// @name ASIN Counter and Decision Tracker
+// @namespace combined_asin_tools
+// @description Tracks ASIN decisions with logs, restore, CSV export, cross-tab sync, and adds decision count with target tracking.
+// @author @noblearl
+// @version 2.2
+// @match https://ir-editor.amazon.com/*
+// @require https://code.jquery.com/jquery-3.6.0.min.js
+// @require https://gist.github.com/raw/2625891/waitForKeyElements.js
+// @homepageURL https://sapp.amazon.com/gco_tools/marconi/index.html
+// @grant GM_setValue
+// @grant GM_getValue
+// @grant GM_addStyle
+// @grant GM_addValueChangeListener
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    const GM_KEYS = {
+        DAILY_TARGET: "daily_target",
+        NON_PRODUCTIVE_MINUTES: "non_productive_minutes",
+        DECISION_COUNT: 'asinDecisionCount',
+        DECISION_MAP: 'asinDecisionMap',
+        DAY_LOGS: 'asinDayLogs',
+        LAST_RESET_DATE: 'lastResetDate',
+        RESET_AT_MIDNIGHT: 'resetAtMidnight'
+    };
+
+    const IDS = {
+        MAIN_CONTAINER: 'asin-tracker-combined-container',
+        DECISION_COUNTER: 'asin-decision-counter',
+        TOGGLE_MENU_BUTTON: 'toggle-details-button',
+        PROGRESS_SECTION: 'progress-section',
+        MENU_DETAILS: 'asin-menu-details',
+        ASIN_TARGET_STATUS_DISPLAY: 'asin-target-status-display',
+        DAY_LOGS_CONTAINER: 'day-logs-container',
+        SETTINGS_BUTTON: 'settings-button',
+        LAP_BUTTON: 'lap-button',
+        RESTORE_BUTTON: 'restore-button',
+        CLEAR_COUNT_BUTTON: 'clear-count-button',
+        CLEAR_LAST_DAY_BUTTON: 'clear-last-day-button',
+        DOWNLOAD_DAYS_BUTTON: 'download-days-button',
+        TOGGLE_DAYS_BUTTON: 'toggle-days-button',
+        TARGET_INPUT: 'target-input',
+        NPH_INPUT: 'nph-input',
+        RESET_MIDNIGHT_CHECKBOX: 'reset-midnight-checkbox',
+        DIALOG_ERROR_MESSAGE: 'dialog-error-message'
+    };
+
+    const CLASSES = {
+        PROGRESS_PERCENTAGE: 'progress-percentage',
+        PROGRESS_FILL: 'progress-fill',
+        DIALOG_OVERLAY: 'custom-dialog-overlay',
+        DIALOG_CONTENT: 'dialog-content',
+        DIALOG_TITLE: 'dialog-title',
+        DIALOG_BUTTONS: 'dialog-buttons',
+        CANCEL_BUTTON: 'cancel-btn',
+        SAVE_BUTTON: 'save-btn',
+        HEADER_BUTTON: 'header-button',
+        ACTION_BUTTON: 'action-button',
+        SETTINGS_CLASS: 'settings',
+        DEFAULT_CLASS: 'default',
+        DANGER_CLASS: 'danger',
+        WARNING_CLASS: 'warning',
+        SUCCESS_CLASS: 'success',
+        ASIN_TARGET_STATUS: 'asin-target-status',
+        SETTING_ITEM: 'setting-item'
+    };
+
+    let daily_target = 500;
+    let non_productive_minutes = 0;
+    let resetAtMidnight = true;
+    let notified = false;
+    const working_hours = 8;
+
+    let decisionCount = 0;
+    let decisionMap = {};
+    let dayLogs = [];
+    const currentChannelId = window.location.href.slice(-8);
+
+    const uiElements = {
+        decisionCounter: null,
+        progressPercentage: null,
+        progressFill: null,
+        menuDetails: null,
+        toggleMenuButton: null,
+        dayLogsContainer: null,
+        asinTargetStatusDisplay: null,
+    };
+
+    async function loadData() {
+        // Load all stored values first
+        decisionCount = parseInt(await GM_getValue(GM_KEYS.DECISION_COUNT, 0));
+        decisionMap = JSON.parse(await GM_getValue(GM_KEYS.DECISION_MAP, '{}'));
+        dayLogs = JSON.parse(await GM_getValue(GM_KEYS.DAY_LOGS, '[]'));
+        daily_target = parseInt(await GM_getValue(GM_KEYS.DAILY_TARGET, 500));
+        non_productive_minutes = parseInt(await GM_getValue(GM_KEYS.NON_PRODUCTIVE_MINUTES, 0));
+        resetAtMidnight = await GM_getValue(GM_KEYS.RESET_AT_MIDNIGHT, true);
+
+        const lastResetDate = await GM_getValue(GM_KEYS.LAST_RESET_DATE, '');
+        const today = new Date().toLocaleDateString();
+
+        if (resetAtMidnight && lastResetDate && lastResetDate !== today) {
+            // It's a new day and reset is enabled.
+            // First, save the accumulated count for the *previous* day (which is the current decisionCount).
+            console.log(`New day detected. Saving previous day's count (${decisionCount}) for ${lastResetDate}.`);
+            
+            // Check if there's an existing log for lastResetDate
+            const existingLogIndex = dayLogs.findIndex(log => log.date === lastResetDate);
+
+            if (existingLogIndex !== -1) {
+                // Update existing log for lastResetDate
+                dayLogs[existingLogIndex].count = decisionCount;
+            } else {
+                // Add new log for lastResetDate
+                dayLogs.push({ date: lastResetDate, count: decisionCount });
+            }
+            
+            // Now, reset the current day's count and map
+            console.log("Resetting ASIN count and map for the new day.");
+            decisionCount = 0;
+            decisionMap = {};
+            await GM_setValue(GM_KEYS.DECISION_COUNT, 0); // Persist the reset
+            await GM_setValue(GM_KEYS.DECISION_MAP, JSON.stringify({})); // Persist the reset
+            await GM_setValue(GM_KEYS.DAY_LOGS, JSON.stringify(dayLogs)); // Persist updated day logs
+            await GM_setValue(GM_KEYS.LAST_RESET_DATE, today); // Store today's date as the last reset
+            notified = false; // Reset notification for the new day
+        } else if (!lastResetDate) {
+            // If it's the very first time running or date was never set, set it to today
+            await GM_setValue(GM_KEYS.LAST_RESET_DATE, today);
+        }
+
+        updateCombinedUI();
+    }
+
+    async function saveData() {
+        await GM_setValue(GM_KEYS.DECISION_COUNT, decisionCount);
+        await GM_setValue(GM_KEYS.DECISION_MAP, JSON.stringify(decisionMap));
+        await GM_setValue(GM_KEYS.DAY_LOGS, JSON.stringify(dayLogs));
+        await GM_setValue(GM_KEYS.DAILY_TARGET, daily_target);
+        await GM_setValue(GM_KEYS.NON_PRODUCTIVE_MINUTES, non_productive_minutes);
+        await GM_setValue(GM_KEYS.RESET_AT_MIDNIGHT, resetAtMidnight);
+    }
+
+    function getAdjustedTarget() {
+        const totalMinutes = working_hours * 60;
+        const effectiveMinutes = totalMinutes - non_productive_minutes;
+        const ratio = Math.max(0, effectiveMinutes / totalMinutes);
+        return Math.round(ratio * daily_target);
+    }
+
+    function calculateProgress(current) {
+        const target = getAdjustedTarget();
+        if (target === 0) return 0;
+        return Math.min(parseFloat(((current / target) * 100).toFixed(2)), 100);
+    }
+
+    function openSettingsDialog() {
+        $(`.${CLASSES.DIALOG_OVERLAY}`).remove();
+        const dialogHTML = `
+            <div class="${CLASSES.DIALOG_OVERLAY}">
+                <div class="${CLASSES.DIALOG_CONTENT}">
+                    <h3 class="${CLASSES.DIALOG_TITLE}">Tracker Settings</h3>
+                    <p>Configure your daily ASIN target and non-productive time.</p>
+                    <p id="${IDS.DIALOG_ERROR_MESSAGE}" style="color: red; font-size: 12px; margin-bottom: 10px; min-height: 1em;"></p>
+                    <div class="${CLASSES.SETTING_ITEM}">
+                        <label for="${IDS.TARGET_INPUT}">Daily Target (ASIN Decisions):</label>
+                        <input type="number" id="${IDS.TARGET_INPUT}" value="${daily_target}" min="1">
+                    </div>
+                    <div class="${CLASSES.SETTING_ITEM}">
+                        <label for="${IDS.NPH_INPUT}">Non-Productive Time (minutes):</label>
+                        <input type="number" id="${IDS.NPH_INPUT}" value="${non_productive_minutes}" min="0" max="480">
+                    </div>
+                    <div class="${CLASSES.SETTING_ITEM}">
+                        <input type="checkbox" id="${IDS.RESET_MIDNIGHT_CHECKBOX}" ${resetAtMidnight ? 'checked' : ''}>
+                        <label for="${IDS.RESET_MIDNIGHT_CHECKBOX}">Reset count at midnight (automatic daily log)</label>
+                    </div>
+                    <div class="${CLASSES.DIALOG_BUTTONS}">
+                        <button class="${CLASSES.CANCEL_BUTTON}">Cancel</button>
+                        <button class="${CLASSES.SAVE_BUTTON}">Save</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        const dialog = $(dialogHTML);
+        const errorMessageElement = dialog.find(`#${IDS.DIALOG_ERROR_MESSAGE}`);
+
+        dialog.find(`.${CLASSES.CANCEL_BUTTON}`).click(() => dialog.remove());
+        dialog.find(`.${CLASSES.SAVE_BUTTON}`).click(async () => {
+            errorMessageElement.text('');
+
+            const newTarget = parseInt($(`#${IDS.TARGET_INPUT}`).val());
+            const newNPH = parseInt($(`#${IDS.NPH_INPUT}`).val());
+            const newResetAtMidnight = $(`#${IDS.RESET_MIDNIGHT_CHECKBOX}`).is(':checked');
+
+            if (newTarget > 0 && newNPH >= 0 && newNPH <= 480) {
+                daily_target = newTarget;
+                non_productive_minutes = newNPH;
+                resetAtMidnight = newResetAtMidnight;
+                await saveData();
+                notified = false;
+                updateCombinedUI();
+                dialog.remove();
+            } else {
+                errorMessageElement.text("Please enter valid values. Daily target must be > 0, NPH between 0-480.");
+            }
+        });
+        $('body').append(dialog);
+    }
+
+    function getQuestionId() {
+        const h5 = document.querySelector('.task-queue-title h5');
+        if (!h5) return null;
+        const match = h5.textContent.match(/[a-f0-9]{32}/i);
+        return match ? match[0] : null;
+    }
+
+    function getAsinFromGrid(gridItem) {
+        const asinLink = gridItem.querySelector('a');
+        return asinLink ? asinLink.textContent.trim() : null;
+    }
+
+    async function saveLap() {
+        const today = new Date().toLocaleDateString();
+
+        const existingLogIndex = dayLogs.findIndex(log => log.date === today);
+
+        if (existingLogIndex !== -1) {
+            dayLogs[existingLogIndex].count = decisionCount;
+        } else {
+            dayLogs.push({ date: today, count: decisionCount });
+        }
+
+        // Optional: Keep only the last X days if you want to maintain a fixed history size.
+        // For example, if (dayLogs.length > 30) { dayLogs.shift(); }
+        // If you want to keep all logs, remove this block.
+
+        await saveData();
+        updateCombinedUI();
+    }
+
+    async function restoreDecisions() {
+        const questionId = getQuestionId();
+        if (!questionId) return;
+        document.querySelectorAll('.label-map-grid-item').forEach(grid => {
+            const asin = getAsinFromGrid(grid);
+            const key = `${questionId}_${asin}`;
+            const decision = decisionMap[key];
+            if (decision) {
+                const buttons = grid.querySelectorAll('.label-map-label-button');
+                buttons.forEach(btn => btn.classList.remove('selected-button'));
+                for (const btn of buttons) {
+                    if (btn.textContent.trim() === decision.buttonText) {
+                        btn.classList.add('selected-button');
+                        grid.style.backgroundColor = 'rgba(0, 128, 0, 0.2)';
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    async function clearCount() {
+        if (!confirm("Are you sure you want to clear ASIN decision counts ? \n\nThis action for counts and map cannot be undone.")) {
+            return;
+        }
+        decisionCount = 0;
+        decisionMap = {};
+        await saveData();
+        document.querySelectorAll('.label-map-grid-item').forEach(g => {
+            g.style.backgroundColor = '';
+            g.querySelectorAll('.label-map-label-button').forEach(btn => btn.classList.remove('selected-button'));
+        });
+        notified = false;
+        updateCombinedUI();
+    }
+
+    async function clearLastDay() {
+        if (dayLogs.length > 0) {
+            if (!confirm("Are you sure you want to clear the LAST day log entry?")) {
+                return;
+            }
+            dayLogs.pop();
+            await saveData();
+            updateCombinedUI();
+        } else {
+            alert("No day logs to clear.");
+        }
+    }
+
+    function downloadCSV() {
+        if (dayLogs.length === 0) {
+            alert("No day logs to download.");
+            return;
+        }
+        let csvContent = "data:text/csv;charset=utf-8,Date,ASINs Completed\n";
+        dayLogs.forEach(log => {
+            csvContent += `${log.date},${log.count}\n`;
+        });
+        const total = dayLogs.reduce((sum, log) => sum + log.count, 0);
+        csvContent += `\nTotal,${total}\n`;
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement('a');
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", "asin_day_logs.csv");
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    function makeDraggable(elm) {
+        elm.onmousedown = function (e) {
+            if (e.target.closest('button, input, select, textarea, a')) {
+                return;
+            }
+            let offsetX = e.clientX - elm.offsetLeft;
+            let offsetY = e.clientY - elm.offsetTop;
+            function mouseMove(e) {
+                elm.style.top = `${e.clientY - offsetY}px`;
+                elm.style.left = `${e.clientX - offsetX}px`;
+                elm.style.right = 'auto';
+            }
+            function stopDrag() {
+                document.removeEventListener('mousemove', mouseMove);
+                document.removeEventListener('mouseup', stopDrag);
+            }
+            document.addEventListener('mousemove', mouseMove);
+            document.addEventListener('mouseup', stopDrag);
+        };
+    }
+
+    async function handleDecisionClick(event) {
+        const btn = event.target.closest('.label-map-label-button');
+        if (!btn) return;
+        const gridItem = btn.closest('.label-map-grid-item');
+        const asin = getAsinFromGrid(gridItem);
+        const questionId = getQuestionId();
+        if (!asin || !questionId) return;
+        const key = `${questionId}_${asin}`;
+        const prevDecision = decisionMap[key] ? decisionMap[key].buttonText : null;
+
+        gridItem.querySelectorAll('.label-map-label-button').forEach(b => b.classList.remove('selected-button'));
+        btn.classList.add('selected-button');
+        gridItem.style.backgroundColor = 'rgba(0, 128, 0, 0.2)';
+        decisionMap[key] = { buttonText: btn.textContent.trim() };
+        if (prevDecision === null) {
+            decisionCount++;
+        }
+        await saveData();
+        updateCombinedUI();
+    }
+    function createHeaderHTML(count) {
+        return `
+            <div id="asin-combined-header">
+                <strong>ASIN Decisions:</strong> <span id="${IDS.DECISION_COUNTER}">${count}</span>
+                <button id="${IDS.TOGGLE_MENU_BUTTON}" class="${CLASSES.HEADER_BUTTON}" aria-expanded="false">Menu ▼</button>
+            </div>
+        `;
+    }
+
+    function createProgressSectionHTML(progress) {
+        return `
+            <div class="${IDS.PROGRESS_SECTION}">
+                <div class="progress-info">
+                    <span class="${CLASSES.PROGRESS_PERCENTAGE}">${progress}%</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="${CLASSES.PROGRESS_FILL}" style="width: ${progress}%;"
+role="progressbar" aria-valuenow="${progress}" aria-valuemin="0" aria-valuemax="100"></div>
+                </div>
+            </div>
+        `;
+    }
+
+    function createMenuDetailsHTML(channelId, currentDecisionCount, currentTarget) {
+        return `
+            <div id="${IDS.MENU_DETAILS}" class="hidden-menu" style="display: none;">
+                <div class="channel-info"><strong>Channel:</strong> ${channelId}</div>
+                <div id="${IDS.ASIN_TARGET_STATUS_DISPLAY}" class="${CLASSES.ASIN_TARGET_STATUS}">ASINs: ${currentDecisionCount} / ${currentTarget}</div>
+                <button id="${IDS.SETTINGS_BUTTON}" class="${CLASSES.ACTION_BUTTON} ${CLASSES.SETTINGS_CLASS}">Settings</button>
+                <button id="${IDS.LAP_BUTTON}" class="${CLASSES.ACTION_BUTTON} ${CLASSES.DEFAULT_CLASS}">Record Day Log</button>
+                <button id="${IDS.RESTORE_BUTTON}" class="${CLASSES.ACTION_BUTTON} ${CLASSES.DEFAULT_CLASS}">Restore Decisions</button>
+                <button id="${IDS.CLEAR_COUNT_BUTTON}" class="${CLASSES.ACTION_BUTTON} ${CLASSES.DANGER_CLASS}">Clear All Count</button>
+                <button id="${IDS.CLEAR_LAST_DAY_BUTTON}" class="${CLASSES.ACTION_BUTTON} ${CLASSES.WARNING_CLASS} ${CLASSES.DEFAULT_CLASS}">Clear Last Day Log</button>
+                <button id="${IDS.DOWNLOAD_DAYS_BUTTON}" class="${CLASSES.ACTION_BUTTON} ${CLASSES.SUCCESS_CLASS}">Download CSV</button>
+                <button id="${IDS.TOGGLE_DAYS_BUTTON}" class="${CLASSES.ACTION_BUTTON} ${CLASSES.DEFAULT_CLASS}">Show/Hide Day Logs</button>
+                <div id="${IDS.DAY_LOGS_CONTAINER}" style="display: none;
+margin-top: 8px;"></div>
+            </div>
+        `;
+    }
+    function updateCombinedUI() {
+        const currentCount = decisionCount;
+        const target = getAdjustedTarget();
+        const progress = calculateProgress(currentCount);
+        let mainContainer = document.getElementById(IDS.MAIN_CONTAINER);
+
+        if (!mainContainer) {
+            mainContainer = document.createElement('div');
+            mainContainer.id = IDS.MAIN_CONTAINER;
+
+            mainContainer.innerHTML = `
+                ${createHeaderHTML(currentCount)}
+                ${createProgressSectionHTML(progress)}
+                ${createMenuDetailsHTML(currentChannelId, currentCount, target)}
+            `;
+
+            Object.assign(mainContainer.style, {
+                position: 'fixed', top: '20px', right: '20px', zIndex: '9999',
+                background: 'rgba(255, 255, 255, 0.95)', color: '#333',
+                padding: '6px', borderRadius: '6px',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                maxWidth: '260px', cursor: 'grab',
+                fontFamily: 'Arial, Helvetica, sans-serif'
+            });
+            document.body.appendChild(mainContainer);
+            makeDraggable(mainContainer);
+
+            uiElements.decisionCounter = document.getElementById(IDS.DECISION_COUNTER);
+            uiElements.progressPercentage = mainContainer.querySelector(`.${CLASSES.PROGRESS_PERCENTAGE}`);
+            uiElements.progressFill = mainContainer.querySelector(`.${CLASSES.PROGRESS_FILL}`);
+            uiElements.menuDetails = document.getElementById(IDS.MENU_DETAILS);
+            uiElements.toggleMenuButton = document.getElementById(IDS.TOGGLE_MENU_BUTTON);
+            uiElements.dayLogsContainer = document.getElementById(IDS.DAY_LOGS_CONTAINER);
+            uiElements.asinTargetStatusDisplay = document.getElementById(IDS.ASIN_TARGET_STATUS_DISPLAY);
+
+            if(uiElements.toggleMenuButton) {
+                uiElements.toggleMenuButton.onclick = () => {
+                    const isHidden = uiElements.menuDetails.style.display === 'none';
+                    uiElements.menuDetails.style.display = isHidden ? 'block' : 'none';
+                    uiElements.toggleMenuButton.textContent = isHidden ? 'Menu ▲' : 'Menu ▼';
+                    uiElements.toggleMenuButton.setAttribute('aria-expanded', isHidden ? 'true' : 'false');
+                };
+            }
+            document.getElementById(IDS.SETTINGS_BUTTON).onclick = openSettingsDialog;
+            document.getElementById(IDS.LAP_BUTTON).onclick = saveLap;
+            document.getElementById(IDS.RESTORE_BUTTON).onclick = restoreDecisions;
+            document.getElementById(IDS.CLEAR_COUNT_BUTTON).onclick = clearCount;
+            document.getElementById(IDS.CLEAR_LAST_DAY_BUTTON).onclick = clearLastDay;
+            document.getElementById(IDS.DOWNLOAD_DAYS_BUTTON).onclick = downloadCSV;
+            document.getElementById(IDS.TOGGLE_DAYS_BUTTON).onclick = () => {
+                if (uiElements.dayLogsContainer) {
+                    const isHidden = uiElements.dayLogsContainer.style.display === 'none';
+                    uiElements.dayLogsContainer.style.display = isHidden ? 'block' : 'none';
+                }
+            };
+        }
+        if (uiElements.decisionCounter) uiElements.decisionCounter.textContent = currentCount;
+        if (uiElements.progressPercentage) uiElements.progressPercentage.textContent = `${progress}%`;
+        if (uiElements.progressFill) {
+            uiElements.progressFill.style.width = `${progress}%`;
+            uiElements.progressFill.setAttribute('aria-valuenow', progress);
+        }
+        if (uiElements.asinTargetStatusDisplay) {
+            uiElements.asinTargetStatusDisplay.textContent = `ASINs: ${currentCount} / ${target}`;
+        }
+
+        updateDayLogs(uiElements.dayLogsContainer);
+
+        if (progress >= 100 && !notified) {
+            notified = true;
+            alert("🎉 Congratulations! You've reached your target!");
+        }
+    }
+
+    function updateDayLogs(logContainer) {
+        if (!logContainer) return;
+        logContainer.innerHTML = '';
+        if (dayLogs.length === 0) {
+            logContainer.innerHTML = '<div style="color: #777; text-align: center; padding: 5px 0; font-size: 12px;">No day logs.</div>';
+            return;
+        }
+        for (let i = 0; i < dayLogs.length; i++) {
+            const day = document.createElement('div');
+            day.textContent = `${dayLogs[i].date}: ${dayLogs[i].count || 0}`;
+            day.style.cssText = `
+                padding: 4px 0;
+                border-bottom: 1px dashed #EEEEEE;
+                color: #555555; font-size: 12px; text-align: left;
+            `;
+            logContainer.appendChild(day);
+        }
+        if (logContainer.lastChild) {
+             logContainer.lastChild.style.borderBottom = 'none';
+        }
+    }
+    GM_addValueChangeListener(GM_KEYS.DECISION_MAP, (name, old_value, new_value) => {
+        decisionMap = JSON.parse(new_value);
+        updateCombinedUI();
+    });
+    GM_addValueChangeListener(GM_KEYS.DECISION_COUNT, (name, old_value, new_value) => {
+        decisionCount = parseInt(new_value);
+        updateCombinedUI();
+    });
+    GM_addValueChangeListener(GM_KEYS.DAY_LOGS, (name, old_value, new_value) => {
+        dayLogs = JSON.parse(new_value);
+        updateCombinedUI();
+    });
+    GM_addValueChangeListener(GM_KEYS.DAILY_TARGET, (name, old_value, new_value) => {
+        daily_target = parseInt(new_value);
+        updateCombinedUI();
+    });
+    GM_addValueChangeListener(GM_KEYS.NON_PRODUCTIVE_MINUTES, (name, old_value, new_value) => {
+        non_productive_minutes = parseInt(new_value);
+        updateCombinedUI();
+    });
+    GM_addValueChangeListener(GM_KEYS.RESET_AT_MIDNIGHT, (name, old_value, new_value) => {
+        resetAtMidnight = new_value;
+    });
+
+    GM_addStyle(`
+        #${IDS.MAIN_CONTAINER} {
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 13px;
+            padding: 6px;
+            border-radius: 6px;
+        }
+        .selected-button {
+            outline: 3px solid #28a745 !important;
+        }
+        #${IDS.MAIN_CONTAINER} button {
+            border-radius: 4px; padding: 6px 10px; margin: 3px 0;
+            font-size: 12px; cursor: pointer; width: 100%;
+            text-align: center; display: block; box-sizing: border-box;
+            transition: background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+        }
+        #${IDS.MAIN_CONTAINER} button:hover { opacity: 0.85; }
+
+        #asin-combined-header {
+            display: flex; justify-content: space-between; align-items: center;
+            padding-bottom: 4px; margin-bottom: 4px;
+            border-bottom: 1px solid #EEEEEE; color: #5A5A5A; font-size: 14px;
+        }
+        #asin-combined-header strong { font-weight: 600; }
+        #${IDS.TOGGLE_MENU_BUTTON}.${CLASSES.HEADER_BUTTON} {
+            background-color: #6c757d; color: white; border: none;
+            padding: 4px 8px; font-size: 11px; min-width: 60px;
+            width: auto; box-shadow: none;
+        }
+        #${IDS.TOGGLE_MENU_BUTTON}.${CLASSES.HEADER_BUTTON}:hover { background-color: #5a6268; opacity: 1; }
+        #${IDS.DECISION_COUNTER} { font-size: 16px; color: #333333; font-weight: 600; margin-left: 4px; }
+
+        .${IDS.PROGRESS_SECTION} {
+            background: #F8F9FA; padding: 5px 6px; border-radius: 5px; margin-bottom: 6px;
+        }
+        .progress-info { display: flex; justify-content: flex-end; align-items: center; margin-bottom: 3px; }
+        .${CLASSES.PROGRESS_PERCENTAGE} { font-size: 11px; color: #5A5A5A; }
+        .progress-bar { height: 6px; background-color: #E9ECEF; border-radius: 3px; overflow: hidden; }
+        .${CLASSES.PROGRESS_FILL} { height: 100%; background-color: #5A5A5A; border-radius: 3px; transition: width 0.4s ease-in-out; }
+
+        #${IDS.MENU_DETAILS} { padding-top: 6px; border-top: 1px solid #EEEEEE; margin-top: 6px; }
+        .${CLASSES.ACTION_BUTTON} {
+            border: 1px solid #CED4DA; background-color: #F8F9FA; color: #333333; box-shadow: none;
+        }
+        .${CLASSES.ACTION_BUTTON}:hover { background-color: #E9ECEF; border-color: #ADB5BD; opacity: 1; }
+        .${CLASSES.ACTION_BUTTON}.${CLASSES.SETTINGS_CLASS} { background-color: #6c757d; color: white; border-color: #6c757d; }
+        .${CLASSES.ACTION_BUTTON}.${CLASSES.SETTINGS_CLASS}:hover { background-color: #5a6268; border-color: #545b62; }
+        .${CLASSES.ACTION_BUTTON}.${CLASSES.DANGER_CLASS} { background-color: #DC3545; color: white; border: none; box-shadow: 0 1px 2px rgba(0,0,0,0.07); }
+        .${CLASSES.ACTION_BUTTON}.${CLASSES.DANGER_CLASS}:hover { background-color: #C82333; opacity: 1; }
+        .${CLASSES.ACTION_BUTTON}.${CLASSES.SUCCESS_CLASS} { background-color: #28A745; color: white; border: none; box-shadow: 0 1px 2px rgba(0,0,0,0.07); }
+        .${CLASSES.ACTION_BUTTON}.${CLASSES.SUCCESS_CLASS}:hover { background-color: #218838; opacity: 1; }
+        .${CLASSES.ACTION_BUTTON}.${CLASSES.WARNING_CLASS} { background-color: #FFC107; color: #212529; border: none; box-shadow: 0 1px 2px rgba(0,0,0,0.07); }
+        .${CLASSES.ACTION_BUTTON}.${CLASSES.WARNING_CLASS}:hover { background-color: #E0A800; opacity:1; }
+
+
+        .channel-info {
+            padding: 4px 0 8px; color: #6c757d; font-size: 11px;
+            border-bottom: 1px solid #EEEEEE; margin-bottom: 8px; text-align: center;
+        }
+        .${CLASSES.ASIN_TARGET_STATUS} {
+            padding: 2px 0 6px; color: #5A5A5A;
+            font-size: 11px;
+            text-align: center;
+            margin-bottom: 8px;
+        }
+
+        #${IDS.DAY_LOGS_CONTAINER} div {
+            padding: 4px 0; border-bottom: 1px dashed #EEEEEE;
+            color: #555555; font-size: 12px; text-align: left;
+        }
+        #${IDS.DAY_LOGS_CONTAINER} div:last-child { border-bottom: none; }
+
+        .${CLASSES.DIALOG_OVERLAY} {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.4); display: flex;
+            justify-content: center; align-items: center; z-index: 10000;
+        }
+        .${CLASSES.DIALOG_OVERLAY} .${CLASSES.DIALOG_CONTENT} {
+            background: #FFFFFF; padding: 20px; border-radius: 6px;
+            width: 320px; box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+            font-family: Arial, Helvetica, sans-serif; color: #333333;
+        }
+        .${CLASSES.DIALOG_OVERLAY} .${CLASSES.DIALOG_TITLE} {
+            margin: 0 0 15px; font-size: 18px; color: #5A5A5A;
+            border-bottom: 1px solid #EEEEEE; padding-bottom: 8px;
+        }
+        .${CLASSES.DIALOG_OVERLAY} p { font-size: 12px; color: #666666; margin-bottom: 12px; }
+        .${CLASSES.DIALOG_OVERLAY} #${IDS.DIALOG_ERROR_MESSAGE} {
+             color: #DC3545; font-size: 12px; margin-bottom: 10px; min-height: 1em;
+        }
+        .${CLASSES.DIALOG_OVERLAY} .${CLASSES.SETTING_ITEM} {
+            margin-bottom: 15px;
+            display: flex;
+            flex-direction: column;
+        }
+        .${CLASSES.DIALOG_OVERLAY} .${CLASSES.SETTING_ITEM} label {
+            margin-bottom: 6px; font-weight: 600; color: #444444; font-size: 12px;
+            display: block;
+        }
+        .${CLASSES.DIALOG_OVERLAY} .${CLASSES.SETTING_ITEM} input[type="number"] {
+            width: calc(100% - 16px); padding: 8px;
+            border: 1px solid #CED4DA; border-radius: 4px;
+            font-size: 13px; box-sizing: border-box;
+        }
+        .${CLASSES.DIALOG_OVERLAY} .${CLASSES.SETTING_ITEM} input[type="checkbox"] {
+            margin-right: 8px;
+            align-self: flex-start;
+        }
+        .${CLASSES.DIALOG_OVERLAY} .${CLASSES.SETTING_ITEM} input[type="checkbox"] + label {
+            display: inline-block;
+            margin-bottom: 0;
+            font-weight: normal;
+            cursor: pointer;
+        }
+        .${CLASSES.DIALOG_OVERLAY} .${CLASSES.SETTING_ITEM}:last-of-type {
+            flex-direction: row;
+            align-items: center;
+        }
+
+        .${CLASSES.DIALOG_OVERLAY} .${CLASSES.DIALOG_BUTTONS} {
+            display: flex; justify-content: flex-end; gap: 8px; margin-top: 15px;
+        }
+        .${CLASSES.DIALOG_OVERLAY} .${CLASSES.DIALOG_BUTTONS} button {
+            padding: 8px 15px; font-size: 13px; border-radius: 4px;
+            cursor: pointer; width: auto; box-shadow: none;
+        }
+        .${CLASSES.DIALOG_OVERLAY} .${CLASSES.DIALOG_BUTTONS} .${CLASSES.CANCEL_BUTTON} {
+            background: #E9ECEF; color: #333333; border: 1px solid #CED4DA;
+        }
+        .${CLASSES.DIALOG_OVERLAY} .${CLASSES.DIALOG_BUTTONS} .${CLASSES.CANCEL_BUTTON}:hover {
+            background: #DEE2E6; border-color: #ADB5BD;
+        }
+        .${CLASSES.DIALOG_OVERLAY} .${CLASSES.DIALOG_BUTTONS} .${CLASSES.SAVE_BUTTON} {
+            background: #5A5A5A; color: white; border: none;
+        }
+        .${CLASSES.DIALOG_OVERLAY} .${CLASSES.DIALOG_BUTTONS} .${CLASSES.SAVE_BUTTON}:hover { background: #4A4A4A; }
+    `);
+
+    document.addEventListener('click', handleDecisionClick, true);
+    waitForKeyElements("div.task-queue-right", loadData);
+})();
+
