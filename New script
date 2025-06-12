@@ -1,0 +1,372 @@
+// ==UserScript==
+// @name         Enhanced IR Editor Grid & Swipe Controller
+// @namespace    amazon_ir_editor_unified_controls
+// @version      5.0
+// @description  A unified script to control grid layout (columns x rows) and activate a one-by-one swipe view with prompt highlighting.
+// @match        https://ir-editor.amazon.com/*
+// @grant        none
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    // =========================================================================
+    // STYLES: Combined and refined styles for all UI components.
+    // =========================================================================
+    const style = document.createElement('style');
+    style.textContent = `
+        /* Main control panel */
+        #unified-ir-controls {
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            z-index: 9999;
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            padding: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            font-family: Arial, sans-serif;
+            width: 180px;
+        }
+
+        #unified-ir-controls h4 {
+            margin: 0 0 10px 0;
+            font-size: 14px;
+            text-align: center;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 8px;
+        }
+
+        #unified-ir-controls label {
+            font-size: 13px;
+            font-weight: bold;
+            display: block;
+            margin-top: 10px;
+        }
+
+        #unified-ir-controls input,
+        #unified-ir-controls button {
+            width: 100%;
+            margin-top: 5px;
+            padding: 8px;
+            font-size: 13px;
+            box-sizing: border-box;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+        }
+
+        #unified-ir-controls button {
+            cursor: pointer;
+            background: #0077cc;
+            color: white;
+            font-weight: bold;
+            border: none;
+            transition: background 0.2s;
+        }
+
+        #unified-ir-controls button:hover {
+            background: #005fa3;
+        }
+        
+        #unified-ir-controls button#reset-grid-layout {
+            background: #6c757d;
+        }
+        #unified-ir-controls button#reset-grid-layout:hover {
+            background: #5a6268;
+        }
+
+        /* Custom Grid styles */
+        .custom-fluid-grid {
+            display: grid !important;
+            gap: 20px;
+            justify-content: start;
+            align-items: start;
+            overflow-y: auto;
+        }
+
+        /* Swipe Mode Overlay */
+        #swipe-card-overlay {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            backdrop-filter: blur(10px);
+            background: rgba(255, 255, 255, 0.9);
+            z-index: 10000;
+            display: none; /* Initially hidden */
+            align-items: stretch;
+            font-size: 16px;
+        }
+
+        #comparison-container {
+            flex: 1;
+            padding: 30px;
+            border-right: 1px solid #eee;
+            overflow-y: auto;
+        }
+        
+        .swipe-card {
+            flex: 1;
+            padding: 30px;
+            position: relative;
+            overflow-y: auto;
+        }
+
+        .swipe-card img, #comparison-container img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin-bottom: 15px;
+        }
+
+        .swipe-close-btn {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: #e74c3c;
+            color: white;
+            border: none;
+            padding: 8px 14px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 16px;
+        }
+
+        #swipe-progress {
+            margin-top: 20px;
+            font-weight: bold;
+            text-align: center;
+        }
+
+        .highlighted-word {
+            padding: 2px 4px;
+            border-radius: 4px;
+        }
+    `;
+    document.head.appendChild(style);
+
+    // =========================================================================
+    // UI: A single control panel for both features.
+    // =========================================================================
+    const controls = document.createElement('div');
+    controls.id = 'unified-ir-controls';
+    controls.innerHTML = `
+        <h4>Enhanced Controls</h4>
+        <label>Columns</label>
+        <input type="number" id="col-count" value="4" min="1" max="10"/>
+        <label>Rows</label>
+        <input type="number" id="row-count" value="2" min="1" max="10"/>
+        <button id="apply-grid-layout" style="margin-top: 15px;">Apply Grid</button>
+        <button id="reset-grid-layout" style="margin-top: 8px;">Reset Grid</button>
+        <button id="activate-swipe-mode" style="margin-top: 15px; background: #28a745;">Swipe Mode</button>
+    `;
+    document.body.appendChild(controls);
+
+    // =========================================================================
+    // OVERLAY: The swipe mode overlay and its components.
+    // =========================================================================
+    const overlay = document.createElement('div');
+    overlay.id = 'swipe-card-overlay';
+    overlay.innerHTML = `
+        <div id="comparison-container">
+            <h3>Prompt Comparison</h3>
+            <div id="comparison-content"></div>
+        </div>
+        <div class="swipe-card">
+            <button class="swipe-close-btn" title="Close (Esc)">X</button>
+            <div id="swipe-card-content"></div>
+            <div id="swipe-progress"></div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    // =========================================================================
+    // SCRIPT STATE & DOM REFERENCES
+    // =========================================================================
+    let originalGridStyle = null;
+    let swipeState = {
+        items: [],
+        currentIndex: 0
+    };
+
+    const ui = {
+        colCount: document.getElementById('col-count'),
+        rowCount: document.getElementById('row-count'),
+        applyBtn: document.getElementById('apply-grid-layout'),
+        resetBtn: document.getElementById('reset-grid-layout'),
+        swipeBtn: document.getElementById('activate-swipe-mode'),
+        overlay: document.getElementById('swipe-card-overlay'),
+        swipeContent: document.getElementById('swipe-card-content'),
+        comparisonContent: document.getElementById('comparison-content'),
+        progressText: document.getElementById('swipe-progress'),
+        closeBtn: overlay.querySelector('.swipe-close-btn')
+    };
+    
+    // =========================================================================
+    // HELPER FUNCTIONS
+    // =========================================================================
+    function getGridContainer() {
+        const item = document.querySelector('.label-map-grid-item');
+        if (!item) {
+            alert("No grid items found. Please wait for the content to load.");
+            return null;
+        }
+        return item.parentElement;
+    }
+
+    // =========================================================================
+    // GRID LAYOUT LOGIC
+    // =========================================================================
+    function applyCustomGrid() {
+        const cols = parseInt(ui.colCount.value);
+        const rows = parseInt(ui.rowCount.value);
+        const parent = getGridContainer();
+        if (!parent) return;
+
+        if (originalGridStyle === null) {
+            originalGridStyle = parent.getAttribute('style') || '';
+        }
+        
+        parent.classList.add('custom-fluid-grid');
+        const totalWidth = window.innerWidth - 80; // Adjusted for padding
+        const colWidth = Math.floor(totalWidth / cols) - 20; // Account for gap
+        
+        parent.style.gridTemplateColumns = `repeat(${cols}, ${colWidth}px)`;
+        parent.style.maxHeight = `${rows * 340}px`; // A bit more space per row
+    }
+
+    function resetGridLayout() {
+        const parent = getGridContainer();
+        if (!parent) return;
+
+        parent.classList.remove('custom-fluid-grid');
+        if (originalGridStyle !== null) {
+            parent.setAttribute('style', originalGridStyle);
+        } else {
+            parent.removeAttribute('style');
+        }
+    }
+
+    // =========================================================================
+    // SWIPE MODE LOGIC
+    // =========================================================================
+    function openSwipeMode() {
+        swipeState.items = Array.from(document.querySelectorAll('.label-map-grid-item'));
+        if (swipeState.items.length === 0) {
+            alert("No grid items to swipe through.");
+            return;
+        }
+        swipeState.currentIndex = 0;
+        ui.overlay.style.display = 'flex';
+        renderCurrentCard();
+    }
+
+    function closeSwipeMode() {
+        ui.overlay.style.display = 'none';
+    }
+
+    function highlightPromptWords(elementToSearch) {
+        const prompt = document.querySelector('.prompt-item');
+        const promptText = prompt?.innerText?.toLowerCase() || '';
+        if (!promptText) return;
+
+        const promptWords = [...new Set(promptText.match(/\b\w{4,}\b/g) || [])];
+        const colors = ['#ffeaa7', '#fab1a0', '#81ecec', '#a29bfe', '#55efc4', '#fdcb6e'];
+        const highlightMap = {};
+        let colorIndex = 0;
+
+        promptWords.forEach(word => {
+            if (!highlightMap[word]) {
+                highlightMap[word] = colors[colorIndex++ % colors.length];
+            }
+        });
+        
+        const walker = document.createTreeWalker(elementToSearch, NodeFilter.SHOW_TEXT);
+        let node;
+        const nodesToReplace = [];
+
+        while (node = walker.nextNode()) {
+            let html = node.textContent;
+            let changed = false;
+            promptWords.forEach(word => {
+                const regex = new RegExp(`\\b(${word})\\b`, 'gi');
+                if (regex.test(html)) {
+                    changed = true;
+                    html = html.replace(regex, `<span class="highlighted-word" style="background:${highlightMap[word]}">$1</span>`);
+                }
+            });
+
+            if (changed) {
+                nodesToReplace.push({ oldNode: node, newHTML: html });
+            }
+        }
+        
+        nodesToReplace.forEach(item => {
+            const span = document.createElement('span');
+            span.innerHTML = item.newHTML;
+            item.oldNode.parentNode.replaceChild(span, item.oldNode);
+        });
+    }
+
+    function renderCurrentCard() {
+        const item = swipeState.items[swipeState.currentIndex];
+        if (!item) return;
+
+        // Clear previous content
+        ui.swipeContent.innerHTML = '';
+        ui.comparisonContent.innerHTML = '';
+
+        // Clone the card and prompt
+        const cardClone = item.cloneNode(true);
+        const promptClone = document.querySelector('.prompt-item')?.cloneNode(true);
+
+        // Clean clones
+        [cardClone, promptClone].forEach(clone => {
+            clone?.querySelectorAll('script, style, svg, canvas').forEach(el => el.remove());
+        });
+
+        // Handle decision button clicks within the swipe view
+        cardClone.querySelectorAll('.label-map-label-button').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const originalButton = Array.from(item.querySelectorAll('.label-map-label-button'))
+                    .find(b => b.textContent.trim() === btn.textContent.trim());
+                if (originalButton) {
+                    originalButton.click();
+                }
+
+                if (swipeState.currentIndex + 1 < swipeState.items.length) {
+                    swipeState.currentIndex++;
+                    renderCurrentCard();
+                } else {
+                    closeSwipeMode();
+                }
+            });
+        });
+
+        highlightPromptWords(cardClone);
+        ui.swipeContent.appendChild(cardClone);
+        ui.progressText.innerText = `${swipeState.currentIndex + 1} of ${swipeState.items.length}`;
+
+        if (promptClone) {
+            ui.comparisonContent.appendChild(promptClone);
+        } else {
+            ui.comparisonContent.innerHTML = '<i>No prompt comparison found.</i>';
+        }
+    }
+
+    // =========================================================================
+    // EVENT LISTENERS
+    // =========================================================================
+    ui.applyBtn.addEventListener('click', applyCustomGrid);
+    ui.resetBtn.addEventListener('click', resetGridLayout);
+    ui.swipeBtn.addEventListener('click', openSwipeMode);
+    ui.closeBtn.addEventListener('click', closeSwipeMode);
+
+    window.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && ui.overlay.style.display === 'flex') {
+            closeSwipeMode();
+        }
+    });
+
+})();
