@@ -1,0 +1,91 @@
+// ==UserScript==
+// @name         IR Editor Grid Layout (Columns x Rows Control)
+// @namespace    amazon_ir_editor_grid_config
+// @version      4.0
+// @description  Control columns and rows in IR Editor grid view
+// @match        https://ir-editor.amazon.com/*
+// @grant        none
+// ==/UserScript==
+(function () {
+  'use strict';
+  const style = document.createElement('style');
+  style.textContent = `
+    #grid-layout-controls {
+      position: fixed;
+      top: 80px;
+      right: 20px;
+      z-index: 10000;
+      background: #fff;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      padding: 10px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      font-family: Arial, sans-serif;
+      width: 160px;
+    }
+    #grid-layout-controls label {
+      font-size: 13px;
+    }
+    #grid-layout-controls input,
+    #grid-layout-controls button {
+      width: 100%;
+      margin-top: 5px;
+      padding: 5px;
+      font-size: 13px;
+    }
+    .custom-fluid-grid {
+      display: grid !important;
+      gap: 20px;
+      justify-content: start;
+      align-items: start;
+    }
+  `;
+  document.head.appendChild(style);
+  const controls = document.createElement('div');
+  controls.id = 'grid-layout-controls';
+  controls.innerHTML = `
+    <label>Columns</label>
+    <input type="number" id="col-count" value="4" min="1" max="10"/>
+    <label>Rows</label>
+    <input type="number" id="row-count" value="2" min="1" max="10"/>
+    <button id="apply-grid-layout">Apply Grid</button>
+    <button id="reset-grid-layout">Reset</button>
+  `;
+  document.body.appendChild(controls);
+  let originalStyle = null;
+  function getGridContainer() {
+    const items = document.querySelectorAll('.label-map-grid-item');
+    if (!items.length) {
+      alert("No grid items found.");
+      return null;
+    }
+    return items[0].parentElement;
+  }
+  function applyCustomGrid(cols, rows) {
+    const parent = getGridContainer();
+    if (!parent) return;
+    if (!originalStyle) originalStyle = parent.getAttribute('style') || '';
+    parent.classList.add('custom-fluid-grid');
+    const totalWidth = window.innerWidth - 60;
+    const colWidth = Math.floor(totalWidth / cols) - 20;
+    parent.style.gridTemplateColumns = `repeat(${cols}, ${colWidth}px)`;
+    parent.style.maxHeight = `${rows * 320}px`;
+    parent.style.overflowY = 'auto';
+  }
+  function resetGridLayout() {
+    const parent = getGridContainer();
+    if (!parent) return;
+    parent.classList.remove('custom-fluid-grid');
+    if (originalStyle !== null) {
+      parent.setAttribute('style', originalStyle);
+    } else {
+      parent.removeAttribute('style');
+    }
+  }
+  document.getElementById('apply-grid-layout').addEventListener('click', () => {
+    const cols = parseInt(document.getElementById('col-count').value);
+    const rows = parseInt(document.getElementById('row-count').value);
+    applyCustomGrid(cols, rows);
+  });
+  document.getElementById('reset-grid-layout').addEventListener('click', resetGridLayout);
+})();
