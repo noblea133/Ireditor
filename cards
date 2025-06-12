@@ -1,0 +1,225 @@
+// ==UserScript==
+// @name         IR Editor Swipeable Card View (1 at a time) + Prompt Word Highlight
+// @namespace    amazon_ir_editor_card_swipemode
+// @version      1.5
+// @description  Swipe through .label-map-grid-item one-by-one with prompt-word highlighting and aligned layout
+// @match        https://ir-editor.amazon.com/*
+// @grant        none
+// ==/UserScript==
+(function () {
+  'use strict';
+  // ====== Styles ======
+  const style = document.createElement('style');
+  style.textContent = `
+    #swipe-toggle-btn {
+      position: fixed;
+      right: 20px;
+      top: 80px;
+      z-index: 10000;
+      padding: 8px 14px;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-weight: bold;
+      font-size: 16px;
+      background: #0077cc;
+    }
+    #swipe-card-overlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0;
+      width: 100vw; height: 100vh;
+      backdrop-filter: blur(10px);
+      background: rgba(255, 255, 255, 0.95);
+      z-index: 9999;
+      display: flex;
+      justify-content: center;
+      align-items: stretch;
+      gap: 0;
+      padding: 0;
+      box-sizing: border-box;
+      overflow-y: auto;
+      font-size: 16px;
+    }
+    .swipe-card, #comparison-container {
+      background: white;
+      padding: 30px;
+      border-radius: 0;
+      width: 50%;
+      height: auto;
+      overflow: visible;
+      box-shadow: none;
+      display: flex;
+      flex-direction: column;
+      box-sizing: border-box;
+    }
+    #comparison-container {
+      border-right: 1px solid #eee;
+    }
+    .swipe-card {
+      border-left: 1px solid #eee;
+      position: relative;
+    }
+    .swipe-card img, #comparison-container img {
+      max-width: 100%;
+      height: auto;
+      display: block;
+      margin-bottom: 10px;
+    }
+    .swipe-close-btn {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: #e74c3c;
+      color: white;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: bold;
+      font-size: 14px;
+      z-index: 10001;
+    }
+    #swipe-progress {
+      margin-top: 20px;
+      font-weight: bold;
+      text-align: center;
+    }
+    #comparison-container h3 {
+      margin-top: 0;
+      margin-bottom: 10px;
+      font-weight: bold;
+      border-bottom: 1px solid #ccc;
+      padding-bottom: 5px;
+    }
+    .highlighted-word {
+      padding: 2px 4px;
+      border-radius: 4px;
+    }
+  `;
+  document.head.appendChild(style);
+  // ====== Create Toggle Button ======
+  const toggleBtn = document.createElement('button');
+  toggleBtn.id = 'swipe-toggle-btn';
+  toggleBtn.innerText = 'Swipe Mode';
+  document.body.appendChild(toggleBtn);
+  // ====== Create Overlay & Cards ======
+  const overlay = document.createElement('div');
+  overlay.id = 'swipe-card-overlay';
+  overlay.innerHTML = `
+    <div id="comparison-container">
+      <h3>Prompt Comparison</h3>
+      <div id="comparison-content"></div>
+    </div>
+    <div class="swipe-card" id="swipe-card">
+      <button class="swipe-close-btn" title="Close (Esc)">X</button>
+      <div id="swipe-card-content"></div>
+      <div id="swipe-progress"></div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const closeBtn = overlay.querySelector('.swipe-close-btn');
+  const swipeCardContent = document.getElementById('swipe-card-content');
+  const progressText = document.getElementById('swipe-progress');
+  const comparisonContent = document.getElementById('comparison-content');
+  let gridItems = [];
+  let currentIndex = 0;
+  // Wait for content to appear
+  function waitForContent() {
+    return new Promise(resolve => {
+      const interval = setInterval(() => {
+        const gridReady = document.querySelectorAll('.label-map-grid-item').length > 0;
+        const promptReady = document.querySelector('.prompt-item');
+        if (gridReady && promptReady) {
+          clearInterval(interval);
+          resolve();
+        }
+      }, 200);
+    });
+  }
+  // Toggle Swipe Mode
+  toggleBtn.addEventListener('click', () => {
+    waitForContent().then(() => {
+      gridItems = Array.from(document.querySelectorAll('.label-map-grid-item'));
+      currentIndex = 0;
+      overlay.style.display = 'flex';
+      renderCurrentCard();
+    });
+  });
+  // Close Overlay
+  closeBtn.addEventListener('click', () => {
+    overlay.style.display = 'none';
+  });
+  // Keyboard close on Esc
+  window.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && overlay.style.display === 'flex') {
+      overlay.style.display = 'none';
+    }
+  });
+  // Render current swipe card & prompt comparison
+  function renderCurrentCard() {
+    const item = gridItems[currentIndex];
+    swipeCardContent.innerHTML = '';
+    comparisonContent.innerHTML = '';
+    const clone = item.cloneNode(true);
+    clone.querySelectorAll('script, style, svg, canvas').forEach(el => el.remove());
+    // Handle decisions
+    const buttons = clone.querySelectorAll('.label-map-label-button');
+    buttons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const realButton = Array.from(item.querySelectorAll('.label-map-label-button'))
+          .find(b => b.textContent.trim() === btn.textContent.trim());
+        if (realButton) realButton.click();
+        // Next or close
+        if (currentIndex + 1 < gridItems.length) {
+          currentIndex++;
+          renderCurrentCard();
+        } else {
+          overlay.style.display = 'none';
+        }
+      });
+    });
+    // Highlight prompt-matching words
+    const prompt = document.querySelector('.prompt-item');
+    const promptText = prompt?.innerText?.toLowerCase() || '';
+    const promptWords = [...new Set(promptText.match(/\b\w{4,}\b/g) || [])];
+    const highlightMap = {};
+    let colorIndex = 0;
+    const colors = ['#ffeaa7', '#fab1a0', '#81ecec', '#a29bfe', '#55efc4', '#fdcb6e'];
+    function highlightMatches(el) {
+      if (!el || el.nodeType !== 1 || el.tagName === 'SCRIPT' || el.tagName === 'STYLE') return;
+      for (const node of Array.from(el.childNodes)) {
+        if (node.nodeType === 3) {
+          const originalText = node.textContent;
+          let newHTML = originalText;
+          promptWords.forEach(word => {
+            const regex = new RegExp(`\\b(${word})\\b`, 'gi');
+            if (regex.test(originalText)) {
+              if (!highlightMap[word]) highlightMap[word] = colors[colorIndex++ % colors.length];
+              newHTML = newHTML.replace(regex, `<span class="highlighted-word" style="background:${highlightMap[word]}">$1</span>`);
+            }
+          });
+          if (newHTML !== originalText) {
+            const span = document.createElement('span');
+            span.innerHTML = newHTML;
+            el.replaceChild(span, node);
+          }
+        } else {
+          highlightMatches(node);
+        }
+      }
+    }
+    highlightMatches(clone);
+    swipeCardContent.appendChild(clone);
+    progressText.innerText = `${currentIndex + 1} of ${gridItems.length}`;
+    // Prompt comparison content
+    if (prompt) {
+      const promptClone = prompt.cloneNode(true);
+      promptClone.querySelectorAll('script, style, svg, canvas').forEach(el => el.remove());
+      comparisonContent.appendChild(promptClone);
+    } else {
+      comparisonContent.innerHTML = '<i>No prompt comparison found.</i>';
+    }
+  }
+})();
