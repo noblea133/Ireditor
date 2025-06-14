@@ -1,0 +1,319 @@
+// ==UserScript==
+// @name         Enhanced IR Editor Swipe Controller
+// @namespace    amazon_ir_editor_unified_controls
+// @version      8.0
+// @description  A streamlined script to activate a full-screen, two-column swipe view with a submit button, enhanced readability, and full navigation. Now with working in-item links.
+// @match        https://ir-editor.amazon.com/*
+// @grant        none
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    const style = document.createElement('style');
+    style.textContent = `
+        #unified-ir-controls {
+            position: fixed; top: 80px; right: 20px; z-index: 9999;
+            background: #fff; border: 1px solid #ccc; border-radius: 8px;
+            padding: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            font-family: Arial, sans-serif; width: 180px; display: block;
+        }
+        #unified-ir-controls h4 {
+            margin: 0 0 10px 0; font-size: 14px; text-align: center;
+            border-bottom: 1px solid #eee; padding-bottom: 8px;
+        }
+        #unified-ir-controls button {
+            width: 100%; margin-top: 5px; padding: 8px; font-size: 13px;
+            box-sizing: border-box;
+            border-radius: 5px; border: 1px solid #ccc;
+        }
+        #unified-ir-controls button {
+            cursor: pointer;
+            background: #28a745; color: white; font-weight: bold; border: none;
+        }
+
+        #swipe-card-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(245, 245, 245, 0.98); backdrop-filter: blur(8px);
+            z-index: 10000; display: none;
+            flex-direction: column;
+            justify-content: center; align-items: center;
+        }
+        #swipe-card-main {
+            background: #fff;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            border: 1px solid #ddd; border-radius: 8px; width: 98vw;
+            max-width: 98vw; height: 98vh; display: flex;
+            flex-direction: column;
+            overflow: hidden; position: relative;
+        }
+        .swipe-close-btn {
+            position: absolute;
+            top: 15px; right: 15px; background: #333;
+            color: white; border: none; width: 30px; height: 30px; border-radius: 50%;
+            cursor: pointer; font-weight: bold;
+            font-size: 14px;
+            line-height: 30px; text-align: center; z-index: 10;
+        }
+        #swipe-card-body {
+            flex-grow: 1;
+            display: flex; overflow: hidden;
+        }
+        #swipe-prompt-container, #swipe-item-container {
+            flex: 1;
+            overflow-y: auto; padding: 25px 30px 45px 30px;
+            height: 100%;
+            font-size: 18px; /* Increased base font size */
+        }
+        #swipe-prompt-container { border-right: 1px solid #eee; }
+        #swipe-prompt-container h4, #swipe-item-container h4 {
+            margin: 0 0 20px 0;
+            font-size: 22px; /* Increased heading font size */ color: #333;
+        }
+        #swipe-item-container img {
+             max-width: 100%;
+            height: auto; display: block; border-radius: 4px; margin: 0 auto;
+        }
+        #swipe-card-footer {
+            flex-shrink: 0;
+            padding: 20px 30px; background: #ffffff;
+            border-top: 1px solid #e5e5e5; display: flex; gap: 15px;
+            justify-content: center; align-items: center;
+            box-shadow: 0 -4px 10px -5px rgba(0,0,0,0.1); position: relative;
+        }
+        #swipe-card-footer button {
+            padding: 12px 25px;
+            font-size: 16px; /* Increased button font size */ font-weight: bold;
+            border-radius: 5px; cursor: pointer; border: 1px solid #ccc;
+        }
+        #swipe-card-footer button.nav-btn { background: #f0f0f0; }
+        #swipe-card-footer button#submit-swipe-btn { background: #007bff; color: white; }
+        #swipe-card-footer button:disabled { opacity: 0.5; cursor: not-allowed; }
+        #decision-buttons-container { display: flex; gap: 10px; }
+        #swipe-progress {
+            position: absolute;
+            left: 30px; top: 50%; transform: translateY(-50%);
+            font-weight: bold; font-size: 16px; color: #555;
+        }
+        .highlighted-word { padding: 2px 4px; border-radius: 4px; }
+    `;
+    document.head.appendChild(style);
+
+    const controlsContainer = document.createElement('div');
+    controlsContainer.id = 'unified-ir-controls';
+    controlsContainer.innerHTML = `
+        <h4>Enhanced Controls</h4>
+        <button id="activate-swipe-mode">Swipe Mode</button>
+    `;
+    document.body.appendChild(controlsContainer);
+
+    const overlay = document.createElement('div');
+    overlay.id = 'swipe-card-overlay';
+    overlay.innerHTML = `
+        <div id="swipe-card-main">
+            <button class="swipe-close-btn" title="Close (Esc)">X</button>
+            <div id="swipe-card-body">
+                <div id="swipe-prompt-container"></div>
+                <div id="swipe-item-container"></div>
+            </div>
+            <div id="swipe-card-footer"></div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    let swipeState = {
+        items: [],
+        currentIndex: 0,
+        currentItemElement: null,
+        currentPlaceholder: null
+    };
+
+    const ui = {
+        controls: document.getElementById('unified-ir-controls'),
+        swipeBtn: document.getElementById('activate-swipe-mode'),
+        overlay: document.getElementById('swipe-card-overlay'),
+        promptContainer: document.getElementById('swipe-prompt-container'),
+        itemContainer: document.getElementById('swipe-item-container'),
+        footer: document.getElementById('swipe-card-footer'),
+        closeBtn: overlay.querySelector('.swipe-close-btn')
+    };
+
+    function moveCurrentItemBack() {
+        if (swipeState.currentItemElement && swipeState.currentPlaceholder) {
+            const buttonContainer = swipeState.currentItemElement.querySelector('.label-map-label-buttons-container');
+            if (buttonContainer) buttonContainer.style.display = ''; // Restore visibility
+            swipeState.currentPlaceholder.parentNode.replaceChild(swipeState.currentItemElement, swipeState.currentPlaceholder);
+        }
+        swipeState.currentItemElement = null;
+        swipeState.currentPlaceholder = null;
+    }
+
+    function openSwipeMode() {
+        swipeState.items = Array.from(document.querySelectorAll('.label-map-grid-item'));
+        if (swipeState.items.length === 0) {
+            alert("No grid items to swipe through.");
+            return;
+        }
+        swipeState.currentIndex = 0;
+        swipeState.currentItemElement = null;
+        swipeState.currentPlaceholder = null;
+
+        ui.controls.style.display = 'none';
+        ui.overlay.style.display = 'flex';
+        renderCurrentCard();
+    }
+
+    function closeSwipeMode() {
+        moveCurrentItemBack();
+        ui.overlay.style.display = 'none';
+        ui.controls.style.display = 'block';
+    }
+
+    function highlightPromptWords(elementToSearch) {
+        const prompt = document.querySelector('.prompt-item');
+        const promptText = prompt?.innerText?.toLowerCase() || '';
+        if (!promptText || !elementToSearch) return;
+
+        const promptWords = [...new Set(promptText.match(/\\b\\w{4,}\\b/g) || [])];
+        const colors = ['#ffeaa7', '#fab1a0', '#81ecec', '#a29bfe', '#55efc4', '#fdcb6e'];
+        let colorIndex = 0;
+        const highlightMap = {};
+        promptWords.forEach(word => {
+            if (!highlightMap[word]) {
+                highlightMap[word] = colors[colorIndex++ % colors.length];
+            }
+        });
+
+        const walker = document.createTreeWalker(elementToSearch, NodeFilter.SHOW_TEXT);
+        let node;
+        const nodesToReplace = [];
+        while ((node = walker.nextNode())) {
+            let html = node.textContent;
+            let changed = false;
+            promptWords.forEach(word => {
+                const regex = new RegExp(`\\b(${word})\\b`, 'gi');
+                if (regex.test(html)) {
+                    changed = true;
+                    html = html.replace(regex, `<span class="highlighted-word" style="background:${highlightMap[word]}">$1</span>`);
+                }
+            });
+            if (changed) {
+                nodesToReplace.push({ oldNode: node, newHTML: html });
+            }
+        }
+        nodesToReplace.forEach(item => {
+            const span = document.createElement('span');
+            span.innerHTML = item.newHTML;
+            item.oldNode.parentNode.replaceChild(span, item.oldNode);
+        });
+    }
+
+    function renderCurrentCard() {
+        moveCurrentItemBack();
+
+        if (swipeState.items.length === 0 || swipeState.currentIndex >= swipeState.items.length) {
+            closeSwipeMode();
+            return;
+        }
+
+        const itemToMove = swipeState.items[swipeState.currentIndex];
+
+        ui.promptContainer.innerHTML = '<h4>Prompt</h4>';
+        ui.itemContainer.innerHTML = '<h4>Grid Item</h4>';
+        ui.footer.innerHTML = '';
+        ui.promptContainer.scrollTop = 0;
+        ui.itemContainer.scrollTop = 0;
+
+        const promptClone = document.querySelector('.prompt-item')?.cloneNode(true);
+        if (promptClone) {
+            promptClone.querySelectorAll('script, style, svg, canvas').forEach(el => el.remove());
+            highlightPromptWords(promptClone);
+            ui.promptContainer.appendChild(promptClone);
+        }
+
+        // Move the original item
+        const placeholder = document.createElement('div');
+        placeholder.style.display = 'none';
+        itemToMove.parentNode.replaceChild(placeholder, itemToMove);
+        swipeState.currentItemElement = itemToMove;
+        swipeState.currentPlaceholder = placeholder;
+
+        ui.itemContainer.appendChild(itemToMove);
+        highlightPromptWords(itemToMove);
+
+        // Create footer buttons based on the moved item's buttons
+        const decisionBtnContainer = document.createElement('div');
+        decisionBtnContainer.id = 'decision-buttons-container';
+        const buttonsInItem = itemToMove.querySelectorAll('.label-map-label-button');
+        buttonsInItem.forEach(originalBtn => {
+            const footerBtn = originalBtn.cloneNode(true); // Clone button for the footer
+            footerBtn.addEventListener('click', () => {
+                originalBtn.click(); // Trigger the original button's action
+                swipeState.items.splice(swipeState.currentIndex, 1);
+                renderCurrentCard();
+            });
+            decisionBtnContainer.appendChild(footerBtn);
+        });
+
+        const buttonContainerInItem = itemToMove.querySelector('.label-map-label-buttons-container');
+        if (buttonContainerInItem) buttonContainerInItem.style.display = 'none'; // Hide original buttons
+
+        const progressText = document.createElement('div');
+        progressText.id = 'swipe-progress';
+        progressText.innerText = `${swipeState.currentIndex + 1} of ${swipeState.items.length}`;
+
+        const prevBtn = document.createElement('button');
+        prevBtn.textContent = '← Prev';
+        prevBtn.className = 'nav-btn';
+        prevBtn.disabled = swipeState.currentIndex === 0;
+        prevBtn.onclick = () => {
+            if (swipeState.currentIndex > 0) {
+                swipeState.currentIndex--;
+                renderCurrentCard();
+            }
+        };
+
+        const nextBtn = document.createElement('button');
+        nextBtn.textContent = 'Next →';
+        nextBtn.className = 'nav-btn';
+        nextBtn.disabled = swipeState.currentIndex >= swipeState.items.length - 1;
+        nextBtn.onclick = () => {
+            if (swipeState.currentIndex < swipeState.items.length - 1) {
+                swipeState.currentIndex++;
+                renderCurrentCard();
+            }
+        };
+
+        const submitBtn = document.createElement('button');
+        submitBtn.textContent = 'Submit';
+        submitBtn.id = 'submit-swipe-btn';
+        submitBtn.onclick = () => {
+            // NOTE: You may need to change '#submit-button' to the correct selector for the main submit button on the page.
+            const mainSubmitButton = document.querySelector('#submit-button');
+            if (mainSubmitButton) {
+                mainSubmitButton.click();
+                closeSwipeMode();
+            } else {
+                alert('Main submit button not found.');
+            }
+        };
+
+        ui.footer.appendChild(progressText);
+        ui.footer.appendChild(prevBtn);
+        ui.footer.appendChild(decisionBtnContainer);
+        ui.footer.appendChild(nextBtn);
+        ui.footer.appendChild(submitBtn);
+    }
+
+    ui.swipeBtn.addEventListener('click', openSwipeMode);
+    ui.closeBtn.addEventListener('click', closeSwipeMode);
+
+    window.addEventListener('keydown', e => {
+        if (ui.overlay.style.display !== 'flex') return;
+        if (e.key === 'Escape') closeSwipeMode();
+        if (e.key === 'ArrowLeft') ui.footer.querySelector('.nav-btn:first-of-type')?.click();
+        if (e.key === 'ArrowRight') ui.footer.querySelector('.nav-btn:last-of-type')?.click();
+    });
+})();
