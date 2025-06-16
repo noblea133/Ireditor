@@ -1,0 +1,190 @@
+
+// ==UserScript==
+// @name         Advanced Dynamic Triage for IR Editor
+// @namespace    amazon_ir_editor_advanced_triage
+// @version      2.0
+// @description  Adds Undo, a visual separator, color-coding, and an on/off toggle to the dynamic triage workflow. Now supports dynamic content refreshing.
+// @match        https://ir-editor.amazon.com/*
+// @grant        GM_setValue
+// @grant        GM_getValue
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // --- CONFIGURATION ---
+    // Easily map button text to a specific color/class.
+    // You can add more text variations (e.g., 'Accept', 'Reject').
+    const decisionColorMapping = {
+        'Match': 'triage-match',
+        'Yes': 'triage-match',
+        'No Match': 'triage-no-match',
+        'No': 'triage-no-match',
+        'Flag': 'triage-flag',
+        'Uncertain': 'triage-flag'
+    };
+
+
+    // --- STYLES ---
+    const style = document.createElement('style');
+    style.textContent = `
+        .triage-processed { transition: opacity 0.3s ease-in-out; }
+        .triage-match { border-left: 5px solid #28a745; }
+        .triage-no-match { border-left: 5px solid #dc3545; }
+        .triage-flag { border-left: 5px solid #ffc107; }
+
+        #triage-controls {
+            position: fixed; bottom: 20px; right: 20px; z-index: 9999;
+            display: flex; gap: 10px; background: #fff; padding: 10px;
+            border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+        #triage-controls button {
+            padding: 8px 15px; font-size: 14px; border: 1px solid #ccc;
+            border-radius: 5px; cursor: pointer; font-weight: bold;
+        }
+        #triage-controls button:disabled { opacity: 0.5; cursor: not-allowed; }
+        #undo-triage-btn { background: #6c757d; color: white; }
+        #toggle-triage-btn.active { background: #007bff; color: white; }
+        #toggle-triage-btn.paused { background: #ffc107; }
+
+        #triage-separator {
+            width: 100%; text-align: center; font-weight: bold;
+            color: #888; padding: 15px 0; margin: 10px 0;
+            border-top: 2px dashed #ccc; border-bottom: 2px dashed #ccc;
+            order: 9998; /* Ensures it stays after non-processed items */
+        }
+    `;
+    document.head.appendChild(style);
+
+
+    // --- UI ELEMENTS ---
+    const controlsDiv = document.createElement('div');
+    controlsDiv.id = 'triage-controls';
+    controlsDiv.innerHTML = `
+        <button id="undo-triage-btn" disabled>Undo</button>
+        <button id="toggle-triage-btn">Toggle Triage</button>
+    `;
+    document.body.appendChild(controlsDiv);
+
+    const separator = document.createElement('div');
+    separator.id = 'triage-separator';
+    separator.textContent = '--- Processed ---';
+
+
+    // --- STATE MANAGEMENT ---
+    let gridContainer = null;
+    let lastMove = { item: null, nextSibling: null, appliedClasses: [] };
+    let isTriageActive = GM_getValue('isTriageActive', true); // Load saved state
+
+    const undoBtn = document.getElementById('undo-triage-btn');
+    const toggleBtn = document.getElementById('toggle-triage-btn');
+
+    function updateToggleUI() {
+        if (isTriageActive) {
+            toggleBtn.textContent = 'Pause';
+            toggleBtn.classList.add('active');
+            toggleBtn.classList.remove('paused');
+        } else {
+            toggleBtn.textContent = 'Resume';
+            toggleBtn.classList.add('paused');
+            toggleBtn.classList.remove('active');
+        }
+    }
+
+
+    // --- CORE FUNCTIONS ---
+    function updateSeparator() {
+        const firstProcessed = gridContainer.querySelector('.triage-processed');
+        if (firstProcessed) {
+            // If the separator isn't in the grid, or not in the right place, move it.
+            if (!separator.parentElement || separator.nextSibling !== firstProcessed) {
+                gridContainer.insertBefore(separator, firstProcessed);
+            }
+        } else if (separator.parentElement) {
+            // If no processed items exist, remove the separator.
+            separator.parentElement.removeChild(separator);
+        }
+    }
+
+    function handleGridClick(event) {
+        if (!isTriageActive) return;
+
+        const button = event.target.closest('.label-map-label-button');
+        if (!button) return;
+
+        const itemToMove = event.target.closest('.label-map-grid-item');
+        if (!itemToMove) return;
+
+        // Save state for potential undo
+        lastMove.item = itemToMove;
+        lastMove.nextSibling = itemToMove.nextSibling;
+        lastMove.appliedClasses = Array.from(itemToMove.classList);
+        undoBtn.disabled = false;
+
+        // Determine color-coding class
+        const buttonText = button.textContent.trim();
+        const colorClass = decisionColorMapping[buttonText] || '';
+
+        // Animate and move the item
+        itemToMove.style.opacity = '0';
+        setTimeout(() => {
+            if (colorClass) itemToMove.classList.add(colorClass);
+            itemToMove.classList.add('triage-processed');
+            gridContainer.appendChild(itemToMove);
+            updateSeparator();
+            itemToMove.style.opacity = '1';
+        }, 300);
+    }
+
+    function undoLastMove() {
+        if (!lastMove.item) return;
+
+        const { item, nextSibling, appliedClasses } = lastMove;
+
+        // Restore original position
+        gridContainer.insertBefore(item, nextSibling);
+
+        // Restore original classes
+        item.className = appliedClasses.join(' ');
+
+        // Clear state and update UI
+        lastMove = { item: null, nextSibling: null, appliedClasses: [] };
+        undoBtn.disabled = true;
+        updateSeparator();
+    }
+
+    function toggleTriage() {
+        isTriageActive = !isTriageActive;
+        GM_setValue('isTriageActive', isTriageActive); // Save state
+        updateToggleUI();
+    }
+
+    // --- INITIALIZATION & DYNAMIC CONTENT HANDLING ---
+    function initializeTriage() {
+        const newGridContainer = document.querySelector('.label-map-grid-item')?.parentElement;
+        if (newGridContainer && newGridContainer !== gridContainer) {
+            console.log("Advanced Triage: Initializing on new grid container.");
+            gridContainer = newGridContainer;
+            gridContainer.addEventListener('click', handleGridClick);
+            updateSeparator(); // Initial check
+        }
+    }
+
+    // Set up the observer to watch for page changes
+    const observer = new MutationObserver((mutations) => {
+        // A simple check is enough; the init function handles the rest.
+        initializeTriage();
+    });
+
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+
+    // Initial setup
+    updateToggleUI();
+    undoBtn.addEventListener('click', undoLastMove);
+    toggleBtn.addEventListener('click', toggleTriage);
+    initializeTriage(); // Initial run in case content is already there
+
+})();
