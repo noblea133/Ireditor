@@ -1,0 +1,73 @@
+
+// ==UserScript==
+// @name         Dynamic Triage for IR Editor
+// @namespace    amazon_ir_editor_dynamic_triage
+// @version      1.0
+// @description  Processes items by moving them to the end of the grid after a decision is made, creating a dynamic waterfall workflow.
+// @match        https://ir-editor.amazon.com/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    /**
+     * Finds the main container that holds all the grid items.
+     * @returns {HTMLElement|null} The grid container element or null if not found.
+     */
+    function getGridContainer() {
+        // This assumes all items share a common parent.
+        const firstItem = document.querySelector('.label-map-grid-item');
+        return firstItem ? firstItem.parentElement : null;
+    }
+
+    /**
+     * Sets up the click listener on the grid container.
+     */
+    function initDynamicTriage() {
+        const gridContainer = getGridContainer();
+
+        if (!gridContainer) {
+            console.log("Dynamic Triage: Grid container not found. Retrying...");
+            // If the grid loads late, retry after a couple of seconds.
+            setTimeout(initDynamicTriage, 2000);
+            return;
+        }
+
+        console.log("Dynamic Triage: Script activated on grid container.");
+
+        // Use a single listener on the parent container for efficiency (event delegation).
+        gridContainer.addEventListener('click', function(event) {
+            // Find the button that was clicked, if any.
+            const button = event.target.closest('.label-map-label-button');
+
+            // If the click was not on a decision button, do nothing.
+            if (!button) {
+                return;
+            }
+
+            // Find the grid item associated with the clicked button.
+            const itemToMove = event.target.closest('.label-map-grid-item');
+
+            if (itemToMove) {
+                // To create a smoother visual effect, we can briefly fade the item out,
+                // move it, and then fade it back in at its new position.
+                itemToMove.style.transition = 'opacity 0.2s ease-out';
+                itemToMove.style.opacity = '0';
+
+                // After the fade-out transition completes...
+                setTimeout(() => {
+                    // This is the core logic: appendChild on an existing child moves it to the end.
+                    gridContainer.appendChild(itemToMove);
+
+                    // Fade the item back in.
+                    itemToMove.style.opacity = '1';
+                }, 200); // This duration should match the transition time.
+            }
+        });
+    }
+
+    // Start the script once the window is loaded.
+    window.addEventListener('load', initDynamicTriage);
+
+})();
