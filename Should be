@@ -1,0 +1,164 @@
+// ==UserScript==
+// @name ASIN Decision Restorer (Standalone - Table/AWSUI Buttons)
+// @namespace standalone_asin_restorer_table
+// @description Restores ASIN decisions on a different page with table layout and awsui-buttons.
+// @author Your Name
+// @version 1.2
+// @match https://ir-editor.amazon.com/* // <--- !!! IMPORTANT: CHANGE THIS TO YOUR TARGET PAGE URL !!!
+// @require https://code.jquery.com/jquery-3.6.0.min.js
+// @require https://gist.github.com/raw/2625891/waitForKeyElements.js
+// @grant GM_setValue
+// @grant GM_getValue
+// @grant GM_addStyle
+// @grant GM_addValueChangeListener
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    const GM_KEYS = {
+        DAILY_TARGET: "daily_target",
+        NON_PRODUCTIVE_MINUTES: "non_productive_minutes",
+        DECISION_COUNT: 'asinDecisionCount',
+        DECISION_MAP: 'asinDecisionMap',
+        DAY_LOGS: 'asinDayLogs',
+        LAST_RESET_DATE: 'lastResetDate',
+        RESET_AT_MIDNIGHT: 'resetAtMidnight',
+        AUTO_RESTORE: 'autoRestore',
+        COUNT_ON_SUBMIT: 'countOnSubmit'
+    }; //
+
+    let decisionMap = {}; // Will be loaded from GM_getValue
+    let pendingDecisionMap = {}; // Used if countOnSubmit is true
+    let autoRestore = true; // Default, will be loaded from GM_getValue
+    let countOnSubmit = false; // Default, will be loaded from GM_getValue
+
+    // Get the current channel ID from the URL (adjust if your new page has a different URL structure)
+    const currentChannelId = window.location.href.slice(-8); // This remains as is
+
+    // --- Helper Functions ---
+
+    function getQuestionId() {
+        // This function extracts a question ID from the current page's HTML.
+        // Based on previous script, assumes question ID is in a h5 element with class .task-queue-title.
+        // NOTE: The provided 'needs.txt' HTML does not contain '.task-queue-title h5'.
+        // You might need to adjust this selector if the question ID is located elsewhere on your new page.
+        const h5 = document.querySelector('.task-queue-title h5');
+        if (!h5) return null; //
+        const match = h5.textContent.match(/[a-f0-9]{32}/i); //
+        return match ? match[0] : null; //
+    }
+
+    /**
+     * Finds the ASIN within a given table row.
+     * The ASIN is located inside an 'a' tag within a 'span' that is itself inside a
+     * [span_1](start_span)'div.cluster-question-vertical-asins'[span_1](end_span).
+     * @param {HTMLElement} rowItem The table row (<tr>) element.
+     * @returns {string|null} The ASIN as a string, or null if not found.
+     */
+    function getAsinFromRow(rowItem) {
+        const asinLink = rowItem.querySelector('.cluster-question-vertical-asins a'); [span_2](start_span)//[span_2](end_span)
+        return asinLink ? asinLink.textContent.trim().replace('*', '') : null; [span_3](start_span)// Remove the '*' if present[span_3](end_span)
+    }
+
+    // --- Data Loading ---
+    async function loadDecisionData() {
+        decisionMap = JSON.parse(await GM_getValue(GM_KEYS.DECISION_MAP, '{}')); //
+        autoRestore = await GM_getValue(GM_KEYS.AUTO_RESTORE, true); //
+        countOnSubmit = await GM_getValue(GM_KEYS.COUNT_ON_SUBMIT, false); //
+    }
+
+    // --- The restoreDecisions function ---
+    async function restoreDecisions() {
+        const questionId = getQuestionId(); //
+        if (!questionId) { //
+            console.warn("Could not find question ID. Skipping decision restore.");
+            return;
+        }
+
+        [span_4](start_span)// Iterate through each table row (<tr>) within the '.cluster-question-table' tbody[span_4](end_span).
+        document.querySelectorAll('table.cluster-question-table tbody tr').forEach(row => {
+            const asin = getAsinFromRow(row);
+            if (!asin) return; // Skip if no ASIN found in this row
+
+            const key = `${questionId}_${asin}`; //
+            const decision = decisionMap[key]; //
+
+            if (decision) {
+                // Decision buttons are the awsui-button elements within '.cluster-labels'
+                [span_5](start_span)// that also have the class 'label-picker-label'[span_5](end_span).
+                const buttons = document.querySelectorAll('.cluster-labels .awsui-button.label-picker-label'); // Corrected selector
+                buttons.forEach(btn => btn.classList.remove('selected')); [span_6](start_span)// Remove 'selected' class from all buttons[span_6](end_span)
+
+                for (const btn of buttons) {
+                    if (btn.textContent.trim() === decision.buttonText) { //
+                        btn.classList.add('selected'); [span_7](start_span)// Add 'selected' class to the matching button[span_7](end_span)
+                        // You might want to highlight the entire row or a specific cell if the decision is applied to the ASIN.
+                        // The original script highlighted the grid, here we highlight the row.
+                        row.style.backgroundColor = 'rgba(0, 128, 0, 0.2)'; // Apply highlight to the row
+
+                        if (countOnSubmit) { //
+                            pendingDecisionMap[key] = { buttonText: decision.buttonText, channelId: currentChannelId }; //
+                        }
+                        break; // Found the button, no need to check others in this row
+                    }
+                }
+            }
+        });
+        console.log("Attempted to restore decisions using awsui-buttons in tables.");
+    }
+
+    // --- Execution Logic for the new script ---
+
+    [span_8](start_span)// Wait for the main table to be present before attempting to restore decisions[span_8](end_span).
+    waitForKeyElements("table.cluster-question-table", async () => {
+        console.log("Main table found. Loading decision data and attempting restore...");
+        await loadDecisionData();
+        if (autoRestore) { //
+            await restoreDecisions(); //
+        }
+    });
+
+    // Optional: If you need to handle decision saving on a submit button for the new page,
+    // you'll also need to uncomment and adapt `handleSubmitButtonClick` and its click listener.
+    // Ensure the selector for the submit button is correct on this new page.
+    // Based on the provided HTML, the submit button is a 'awsui-button' within
+    [span_9](start_span)// '.cluster-question-top-bar-submit-buttons' that specifically has the text "Submit"[span_9](end_span).
+    /*
+    waitForKeyElements(".cluster-question-top-bar-submit-buttons awsui-button.cluster-question-top-bar-submit button", (element) => {
+        element.addEventListener('click', handleSubmitButtonClick);
+        console.log("Attached event listener to Submit button on new page.");
+    }, true);
+
+    async function handleSubmitButtonClick() {
+        if (!countOnSubmit) return;
+        const questionId = getQuestionId();
+        if (!questionId) return;
+
+        let decisionsActuallySubmitted = 0;
+        // Iterate through each table row (<tr>) within the '.cluster-question-table' tbody
+        document.querySelectorAll('table.cluster-question-table tbody tr').forEach(row => {
+            const asin = getAsinFromRow(row);
+            const key = `${questionId}_${asin}`;
+            // Find the selected decision button within the '.cluster-labels' section
+            const selectedButton = document.querySelector('.cluster-labels .awsui-button.label-picker-label.selected');
+
+            if (selectedButton && pendingDecisionMap[key]) {
+                if (!decisionMap[key]) {
+                    decisionMap[key] = pendingDecisionMap[key];
+                    decisionsActuallySubmitted++;
+                }
+            }
+            // Clear visual feedback after submission if needed
+            row.style.backgroundColor = '';
+            // No need to remove 'selected' class from decision buttons here, as they are global on the page
+        });
+
+        pendingDecisionMap = {};
+        if (decisionsActuallySubmitted > 0) {
+            await GM_setValue(GM_KEYS.DECISION_MAP, JSON.stringify(decisionMap));
+            console.log(`Submitted ${decisionsActuallySubmitted} decisions.`);
+        }
+    }
+    */
+})();
