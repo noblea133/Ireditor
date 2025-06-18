@@ -1,0 +1,272 @@
+
+// ==UserScript==
+// @name ASIN Decision Tool (Clicks & Restore - Final Audit Version)
+// @namespace asin_decision_tool_final_audit
+// @description Observes button clicks, saves/restores decisions for ASINs based on a dynamic question ID, and includes a script toggle. Designed for direct page understanding.
+// @author Your Name
+// @version 1.6
+// @match https://ir-editor.amazon.com/questionHub/#/channel/* // <--- !!! IMPORTANT: VERIFY THIS AGAINST YOUR EXACT BROWSER URL !!!
+// @require https://code.jquery.com/jquery-3.6.0.min.js
+// @require https://gist.github.com/raw/2625891/waitForKeyElements.js
+// @grant GM_setValue
+// @grant GM_getValue
+// @grant GM_addStyle
+// @grant GM_addValueChangeListener
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    // --- Configuration and Global Variables ---
+    const GM_KEYS = {
+        DECISION_MAP: 'asinDecisionMap', // Stores the ASIN decisions (key: fullQuestionId_ASIN, value: {buttonText, channelId})
+        SCRIPT_ENABLED: 'asinScriptEnabledState', // For the script ON/OFF toggle state
+    };
+
+    let decisionMap = {}; // Will be loaded from GM_getValue
+    const autoRestore = true; // Always true, as requested by "restoring should be always on"
+
+    // Gets the last 8 characters of the URL as the current channel ID
+    const currentChannelId = window.location.href.slice(-8);
+
+    // --- Script Toggle Button UI ---
+    // Injects CSS for the toggle button to ensure it's visible and styled
+    GM_addStyle(`
+        #asin-script-toggle-button {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background-color: #4CAF50; /* Green (ON) */
+            color: white;
+            padding: 8px 15px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            z-index: 10000; /* Ensures it appears above other page elements */
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            font-weight: bold;
+        }
+        #asin-script-toggle-button:hover {
+            background-color: #45a049;
+        }
+        #asin-script-toggle-button.disabled {
+            background-color: #f44336; /* Red (OFF) */
+        }
+        #asin-script-toggle-button.disabled:hover {
+            background-color: #da190b;
+        }
+    `);
+
+    // Creates the toggle button element and adds it to the page body
+    let toggleButton = document.createElement('button');
+    toggleButton.id = 'asin-script-toggle-button';
+    document.body.appendChild(toggleButton);
+
+    // --- Helper Functions ---
+
+    /**
+     * Extracts the full question ID string from an <h5> element that contains "Question: ".
+     * This function iterates through all <h5> tags on the page to find the one matching the pattern.
+     * @returns {string|null} The full question ID string (e.g., "B09N7FJ1HT/4_B09N7HQS4R/4..."), or null if not found.
+     */
+    function getQuestionId() {
+        const allH5s = document.querySelectorAll('h5');
+        for (const h5 of allH5s) {
+            if (h5.textContent.includes('Question: ')) {
+                const fullQuestionId = h5.textContent.split('Question: ')[1].trim();
+                if (fullQuestionId) {
+                    return fullQuestionId;
+                }
+            }
+        }
+        // If no matching h5 is found, log an error (visible in browser console)
+        console.error("ASIN Decision Tool: ERROR - Could not find <h5> with 'Question: ' for question ID.");
+        return null;
+    }
+
+    /**
+     * Finds the ASIN within a given table row based on the expected HTML structure.
+     * @param {HTMLElement} rowItem The table row (<tr>) element.
+     * @returns {string|null} The ASIN as a string (e.g., "B09N6M3RRJ"), or null if not found.
+     */
+    function getAsinFromRow(rowItem) {
+        // Looks for an <a> tag within a div having class 'cluster-question-vertical-asins' inside the row
+        const asinLink = rowItem.querySelector('.cluster-question-vertical-asins a');
+        if (asinLink) {
+            // Removes any leading '*' character and trims whitespace from the ASIN text
+            return asinLink.textContent.trim().replace('*', '');
+        }
+        return null;
+    }
+
+    // --- Data Loading ---
+    // Loads the stored decision map from browser's local storage (managed by Greasemonkey/Tampermonkey)
+    async function loadDecisionData() {
+        decisionMap = JSON.parse(await GM_getValue(GM_KEYS.DECISION_MAP, '{}'));
+        console.log("ASIN Decision Tool: Decision data loaded.");
+    }
+
+    /**
+     * Updates the page's UI based on stored decisions for the current question.
+     * This involves highlighting table rows and setting the 'selected' state for the
+     * global decision button.
+     */
+    async function updateUIWithDecisions() {
+        const questionId = getQuestionId();
+        if (!questionId) {
+            // Error message already handled in getQuestionId()
+            return;
+        }
+
+        // Selects all global decision buttons (e.g., 'A', 'B', 'C' buttons)
+        const globalDecisionButtons = document.querySelectorAll('.cluster-labels .awsui-button.label-picker-label');
+        // Clears any previously applied 'selected' state from all decision buttons
+        globalDecisionButtons.forEach(btn => btn.classList.remove('selected'));
+
+        let decisionButtonTextToSelect = null; // Variable to store the text of the button that should be highlighted
+
+        // Iterates through each ASIN table row to check for stored decisions and apply highlights
+        document.querySelectorAll('table.cluster-question-table tbody tr').forEach(row => {
+            const asin = getAsinFromRow(row);
+            if (!asin) {
+                row.style.backgroundColor = ''; // Ensures no highlight if ASIN is not found in a row
+                return;
+            }
+
+            const key = `${questionId}_${asin}`; // Creates a unique key for the decision
+            const decision = decisionMap[key];
+
+            if (decision) {
+                // If a decision is found for this ASIN, store its button text and highlight the row
+                decisionButtonTextToSelect = decision.buttonText;
+                row.style.backgroundColor = 'rgba(0, 128, 0, 0.2)'; // Green highlight for decided rows
+            } else {
+                row.style.backgroundColor = ''; // Removes highlight if no decision is found for the row
+            }
+        });
+
+        // Applies the 'selected' class to the global decision button whose text matches the stored decision
+        if (decisionButtonTextToSelect) {
+            for (const btn of globalDecisionButtons) {
+                if (btn.textContent.trim() === decisionButtonTextToSelect) {
+                    btn.classList.add('selected');
+                    console.log(`ASIN Decision Tool: Global decision button "${decisionButtonTextToSelect}" selected based on stored data.`);
+                    break;
+                }
+            }
+        } else {
+            console.log("ASIN Decision Tool: No stored decision found for current question. Clearing all selections.");
+        }
+        console.log("ASIN Decision Tool: UI updated based on stored decisions.");
+    }
+
+    /**
+     * Handles clicks on the global decision buttons.
+     * Saves the chosen decision for all currently displayed ASINs under the current question,
+     * and updates the UI accordingly.
+     * @param {Event} event The click event object.
+     */
+    async function handleDecisionButtonClick(event) {
+        const clickedButton = event.currentTarget; // The actual button element that was clicked
+        const buttonText = clickedButton.textContent.trim(); // The text of the clicked button (e.g., "A", "B")
+
+        const questionId = getQuestionId();
+        if (!questionId) {
+            console.error("ASIN Decision Tool: ERROR - No question ID found. Cannot save decision.");
+            return;
+        }
+
+        // Remove 'selected' class from all other buttons and add it to the one just clicked
+        const globalDecisionButtons = document.querySelectorAll('.cluster-labels .awsui-button.label-picker-label');
+        globalDecisionButtons.forEach(btn => btn.classList.remove('selected'));
+        clickedButton.classList.add('selected'); // Highlight the clicked button
+
+        // Save this decision for ALL currently displayed ASINs in the table
+        let decisionsSavedCount = 0;
+        document.querySelectorAll('table.cluster-question-table tbody tr').forEach(row => {
+            const asin = getAsinFromRow(row);
+            if (asin) {
+                const key = `${questionId}_${asin}`; // Unique key for storing decision for this ASIN under this question
+                // Store the decision directly in the decisionMap
+                decisionMap[key] = { buttonText: buttonText, channelId: currentChannelId };
+                decisionsSavedCount++;
+                row.style.backgroundColor = 'rgba(0, 128, 0, 0.2)'; // Highlight the row
+            } else {
+                row.style.backgroundColor = ''; // Ensure no stale highlight if ASIN not found
+            }
+        });
+
+        if (decisionsSavedCount > 0) {
+            // Save the updated decisionMap back to GM_Value (persists across sessions)
+            await GM_setValue(GM_KEYS.DECISION_MAP, JSON.stringify(decisionMap));
+            console.log(`ASIN Decision Tool: Saved decision "${buttonText}" for ${decisionsSavedCount} ASINs under question ID: ${questionId}`);
+        }
+    }
+
+    // --- Main Script Execution Logic ---
+    // This immediately invoked async function wraps the main logic to allow `await` calls.
+    (async () => {
+        // Retrieve the script's enabled state from storage (defaulting to true if not set)
+        let scriptEnabled = await GM_getValue(GM_KEYS.SCRIPT_ENABLED, true);
+
+        // Update the ON/OFF toggle button's text and style based on the current state
+        toggleButton.textContent = scriptEnabled ? 'Script ON' : 'Script OFF';
+        toggleButton.classList.toggle('disabled', !scriptEnabled);
+
+        // Sets up the click handler for the ON/OFF toggle button
+        toggleButton.onclick = async () => {
+            scriptEnabled = !scriptEnabled; // Toggle the state
+            await GM_setValue(GM_KEYS.SCRIPT_ENABLED, scriptEnabled); // Save the new state
+            alert(`ASIN Decision Tool is now ${scriptEnabled ? 'ON' : 'OFF'}. The page will reload.`);
+            location.reload(); // Reload the page to fully apply the script's new enabled/disabled state
+        };
+
+        // --- Core functionality only runs if the script is enabled ---
+        if (scriptEnabled) {
+            console.log("ASIN Decision Tool: Script is ON. Initializing core functionality...");
+
+            // Listens for changes to the decisionMap from other browser tabs/windows
+            // If another tab saves a decision, this tab will update its UI automatically.
+            GM_addValueChangeListener(GM_KEYS.DECISION_MAP, (name, old_value, new_value) => {
+                console.log("ASIN Decision Tool: Decision Map changed in another tab. Updating UI.");
+                decisionMap = JSON.parse(new_value);
+                updateUIWithDecisions(); // Re-apply decisions to the UI
+            });
+
+            // Waits for the main content container of the task queue to appear on the page.
+            // This ensures the script has the necessary elements to interact with.
+            waitForKeyElements("div.task-queue-right", async () => {
+                console.log("ASIN Decision Tool: Main task queue container found. Loading decision data...");
+                await loadDecisionData(); // Load saved decisions
+
+                // If autoRestore is true (which is always true as requested), restore decisions to UI
+                if (autoRestore) {
+                    console.log("ASIN Decision Tool: Auto-restore is enabled. Attempting to restore UI state...");
+                    await updateUIWithDecisions();
+                }
+
+                // Waits for the global decision buttons (A, B, C, etc.) to appear.
+                // Attaches a click listener to each button to handle saving decisions.
+                waitForKeyElements(".cluster-labels .awsui-button.label-picker-label", (element) => {
+                    // This check prevents attaching multiple listeners if elements are re-rendered
+                    if (!element.hasAttribute('data-listener-attached')) {
+                        element.addEventListener('click', handleDecisionButtonClick);
+                        element.setAttribute('data-listener-attached', 'true'); // Mark as attached
+                        console.log(`ASIN Decision Tool: Attached click listener to decision button: "${element.textContent.trim()}"`);
+                    }
+                }, true); // The 'true' ensures it runs for all matching elements initially and for new ones that appear dynamically
+            });
+
+        } else {
+            console.log("ASIN Decision Tool: Script is OFF. Core functionality is disabled.");
+            // If the script is turned OFF, it clears any visual states it might have applied.
+            document.querySelectorAll('table.cluster-question-table tbody tr').forEach(row => {
+                row.style.backgroundColor = ''; // Remove row highlights
+            });
+            document.querySelectorAll('.cluster-labels .awsui-button.label-picker-label').forEach(btn => {
+                btn.classList.remove('selected'); // Remove selected state from buttons
+            });
+        }
+    })(); // End of the main immediately invoked async function
+})(); // End of the main script closure
