@@ -1,0 +1,338 @@
+
+// ==UserScript==
+// @name         Question Hub Label State Restorer (Direct Visual Restore - DEBUG)
+// @namespace    http://tampermonkey.net/
+// @version      0.8 // Increased version for clarity
+// @description  Restores the filled-in state (content & color) of labels (<td>s) and the selected state of label picker buttons by directly applying saved visual states. Includes extensive debugging.
+// @author       Gemini
+// @match        *://*/* // IMPORTANT: Change this to the specific URL of your "Question Hub" page!
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @grant        GM_addStyle
+// @run-at       document-idle // Ensures all elements are likely loaded and initial JS has run
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    console.log("DEBUG: Tampermonkey script started. Version 0.8 (Direct Visual Restore, Enhanced Debugging).");
+
+    // --- Configuration Keys for Local Storage ---
+    const SCRIPT_ENABLED_KEY = 'qh_label_restore_enabled';
+    const TD_LABEL_STATES_KEY = 'qh_td_label_states'; // Stores states for td.cluster-question-item-data-label
+    const LABEL_BUTTON_STATES_KEY = 'qh_label_button_states'; // Stores states for label picker buttons
+
+    // Global flag to control script's saving behavior.
+    let scriptEnabled = GM_getValue(SCRIPT_ENABLED_KEY, true);
+
+    console.log(`DEBUG: Initial scriptEnabled state: ${scriptEnabled}`);
+
+    // --- UI for Toggle Switch ---
+    function createToggleUI() {
+        console.log("DEBUG: Creating toggle UI.");
+        const toggleContainer = document.createElement('div');
+        toggleContainer.id = 'tampermonkey-toggle-container';
+        Object.assign(toggleContainer.style, {
+            position: 'fixed',
+            bottom: '10px',
+            left: '10px',
+            background: '#333',
+            color: 'white',
+            padding: '8px 12px',
+            borderRadius: '5px',
+            zIndex: '99999',
+            fontSize: '13px',
+            fontFamily: 'sans-serif',
+            boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+        });
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.id = 'tampermonkey-toggle';
+        checkbox.checked = scriptEnabled;
+        checkbox.style.cursor = 'pointer';
+
+        checkbox.addEventListener('change', (event) => {
+            scriptEnabled = event.target.checked;
+            GM_setValue(SCRIPT_ENABLED_KEY, scriptEnabled);
+            console.log(`DEBUG: Toggle changed. scriptEnabled: ${scriptEnabled}`);
+
+            if (!scriptEnabled) {
+                console.log("DEBUG: Script disabled. Clearing all states.");
+                clearAllStates(); // Clear all visual states and storage if disabled
+            } else {
+                console.log("DEBUG: Script enabled. Initiating restoration.");
+                restoreAllStates(); // Restore if re-enabled
+            }
+        });
+
+        const label = document.createElement('label');
+        label.htmlFor = 'tampermonkey-toggle';
+        label.textContent = 'Restore Label States (Visual)';
+        label.style.cursor = 'pointer';
+
+        toggleContainer.appendChild(checkbox);
+        toggleContainer.appendChild(label);
+        document.body.appendChild(toggleContainer);
+        console.log("DEBUG: Toggle UI created and appended.");
+    }
+
+    // --- Utility Functions for State Management ---
+
+    /**
+     * Generates a unique key for a label picker button.
+     * @param {HTMLElement} buttonElement The button element.
+     * @returns {string|null} A unique key for the button (e.g., 'label-A', 'clear-all-button'), or null if not a recognized button.
+     */
+    function getLabelButtonKey(buttonElement) {
+        if (buttonElement.classList.contains('label-picker-label')) {
+            const text = buttonElement.textContent.trim();
+            return `label-${text}`;
+        } else if (buttonElement.classList.contains('label-picker-clear-all')) {
+            return 'clear-all-button';
+        } else if (buttonElement.classList.contains('label-picker-select-remaining')) {
+            return 'select-remaining-button';
+        } else if (buttonElement.classList.contains('label-picker-bv')) {
+            return 'orphanize-remaining-button';
+        }
+        return null;
+    }
+
+    /**
+     * Saves the state of a td.cluster-question-item-data-label.
+     * @param {string} id The unique data-persisted-id of the td.
+     * @param {string} textContent The current text content of the td.
+     * @param {string} backgroundColor The current background-color style of the td.
+     */
+    function saveTdLabelState(id, textContent, backgroundColor) {
+        if (!scriptEnabled) {
+            console.log(`DEBUG: (Save TD) Script disabled. Not saving state for ${id}.`);
+            return;
+        }
+
+        let states = JSON.parse(GM_getValue(TD_LABEL_STATES_KEY, '{}'));
+        states[id] = { textContent: textContent, backgroundColor: backgroundColor };
+        GM_setValue(TD_LABEL_STATES_KEY, JSON.stringify(states));
+        console.log(`DEBUG: (Save TD) Saved state for ${id}: Text='${textContent}', BG='${backgroundColor}'. Stored data:`, states);
+    }
+
+    /**
+     * Saves the state of a label picker button.
+     * @param {string} key The unique key for the button.
+     * @param {boolean} isSelected True if the button has the 'selected' class.
+     * @param {string} backgroundColor The current background-color style of the button.
+     */
+    function saveLabelButtonState(key, isSelected, backgroundColor) {
+        if (!scriptEnabled) {
+            console.log(`DEBUG: (Save Button) Script disabled. Not saving state for ${key}.`);
+            return;
+        }
+
+        let states = JSON.parse(GM_getValue(LABEL_BUTTON_STATES_KEY, '{}'));
+        states[key] = { isSelected: isSelected, backgroundColor: backgroundColor };
+        GM_setValue(LABEL_BUTTON_STATES_KEY, JSON.stringify(states));
+        console.log(`DEBUG: (Save Button) Saved state for ${key}: selected=${isSelected}, bgColor=${backgroundColor}. Stored data:`, states);
+    }
+
+    /**
+     * Restores the states of all tracked elements from storage by directly applying visual properties.
+     */
+    function restoreAllStates() {
+        if (!scriptEnabled) {
+            console.log("DEBUG: Restoration skipped because script is disabled.");
+            return;
+        }
+
+        console.log("DEBUG: Starting direct visual restoration process...");
+
+        // Restore TD label states
+        const tdLabelStates = JSON.parse(GM_getValue(TD_LABEL_STATES_KEY, '{}'));
+        console.log("DEBUG: (Restore TD) Retrieved TD states from storage:", tdLabelStates);
+        for (const id in tdLabelStates) {
+            const td = document.querySelector(`td.cluster-question-item-data-label[data-persisted-id="${id}"]`);
+            if (td) {
+                const state = tdLabelStates[id];
+                td.textContent = state.textContent;
+                td.style.backgroundColor = state.backgroundColor;
+                console.log(`DEBUG: (Restore TD) Applied state to ${id}: Text='${state.textContent}', BG='${state.backgroundColor}'`);
+            } else {
+                console.warn(`DEBUG: (Restore TD) Could not find TD label with data-persisted-id="${id}" for restoration.`);
+            }
+        }
+
+        // Restore Label Button states
+        const labelButtonStates = JSON.parse(GM_getValue(LABEL_BUTTON_STATES_KEY, '{}'));
+        console.log("DEBUG: (Restore Button) Retrieved Button states from storage:", labelButtonStates);
+        const labelButtons = document.querySelectorAll('.cluster-labels button');
+
+        labelButtons.forEach(button => {
+            const key = getLabelButtonKey(button);
+            if (key && labelButtonStates[key]) {
+                const state = labelButtonStates[key];
+                if (state.isSelected) {
+                    button.classList.add('selected');
+                } else {
+                    button.classList.remove('selected');
+                }
+                button.style.backgroundColor = state.backgroundColor;
+                console.log(`DEBUG: (Restore Button) Applied state to ${key}: selected=${state.isSelected}, bgColor=${state.backgroundColor}`);
+            } else if (key) {
+                 console.log(`DEBUG: (Restore Button) No saved state for button ${key}. Skipping visual restoration.`);
+            }
+        });
+        
+        console.log("DEBUG: Direct visual restoration process complete.");
+    }
+
+    /**
+     * Clears all stored states and resets elements to their default visual states.
+     */
+    function clearAllStates() {
+        console.log("DEBUG: Clearing all states.");
+        // Clear TD label states visually and from storage
+        const tdLabels = document.querySelectorAll('td.cluster-question-item-data-label[data-persisted-id]');
+        tdLabels.forEach(td => {
+            td.textContent = '_';
+            td.style.backgroundColor = 'white';
+            console.log(`DEBUG: Reset TD label visually: ${td.dataset.persistedId}`);
+        });
+        GM_setValue(TD_LABEL_STATES_KEY, '{}');
+        console.log("DEBUG: TD label states cleared from storage.");
+
+        // Clear Label Button states visually and from storage
+        const labelButtons = document.querySelectorAll('.cluster-labels button');
+        labelButtons.forEach(button => {
+            const key = getLabelButtonKey(button);
+            if (key) {
+                button.classList.remove('selected');
+                if (button.classList.contains('label-picker-label')) {
+                    button.style.backgroundColor = 'white';
+                }
+                console.log(`DEBUG: Reset button visually: ${key}`);
+            }
+        });
+        GM_setValue(LABEL_BUTTON_STATES_KEY, '{}');
+        console.log("DEBUG: Label button states cleared from storage.");
+    }
+
+    // --- Observers and Event Listeners ---
+
+    // 1. Assign unique IDs to TD labels and set up MutationObserver
+    function initializeTdLabelsAndObserve() {
+        console.log("DEBUG: Initializing TD labels and setting up observers.");
+        // Observer for newly added TD labels in the DOM
+        const globalObserver = new MutationObserver(function(mutationsList) {
+            mutationsList.forEach(mutation => {
+                if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+                    console.log("DEBUG: Global MutationObserver detected new nodes added.");
+                    mutation.addedNodes.forEach(node => {
+                        // Check if the added node itself is a TD label or contains TD labels
+                        if (node.nodeType === Node.ELEMENT_NODE && (node.matches('td.cluster-question-item-data-label') || node.querySelector('td.cluster-question-item-data-label'))) {
+                            const tdsToProcess = node.matches('td.cluster-question-item-data-label') ? [node] : node.querySelectorAll('td.cluster-question-item-data-label');
+                            tdsToProcess.forEach(td => {
+                                if (!td.dataset.persistedId) {
+                                    // Assign a unique ID based on its current position among all labels
+                                    // This is still order-dependent and may be fragile if order changes dynamically.
+                                    const allLabels = document.querySelectorAll('td.cluster-question-item-data-label');
+                                    td.dataset.persistedId = `td-label-${Array.from(allLabels).indexOf(td)}`;
+                                    console.log(`DEBUG: Assigned new data-persisted-id='${td.dataset.persistedId}' to dynamically added TD.`);
+                                } else {
+                                    console.log(`DEBUG: TD with existing data-persisted-id='${td.dataset.persistedId}' found in new nodes.`);
+                                }
+                                setupTdMutationObserver(td);
+                            });
+                        }
+                    });
+                }
+            });
+        });
+        globalObserver.observe(document.body, { childList: true, subtree: true });
+        console.log("DEBUG: Global MutationObserver for new TD labels initialized on document.body.");
+
+
+        // Set up initial TD labels on load
+        document.querySelectorAll('td.cluster-question-item-data-label').forEach((td, index) => {
+            if (!td.dataset.persistedId) {
+                td.dataset.persistedId = `td-label-${index}`; // Assign unique ID based on initial order
+                console.log(`DEBUG: Assigned initial data-persisted-id='${td.dataset.persistedId}' to TD at index ${index}.`);
+            } else {
+                 console.log(`DEBUG: TD at index ${index} already has data-persisted-id='${td.dataset.persistedId}'.`);
+            }
+            setupTdMutationObserver(td);
+        });
+        console.log("DEBUG: Setup complete for initial TD labels.");
+    }
+
+    /**
+     * Sets up a MutationObserver for a single TD label element to watch for content/style changes.
+     * @param {HTMLElement} td The td.cluster-question-item-data-label element to observe.
+     */
+    function setupTdMutationObserver(td) {
+        const observer = new MutationObserver(mutations => {
+            mutations.forEach(mutation => {
+                if (scriptEnabled && (
+                    mutation.type === 'characterData' ||
+                    (mutation.type === 'attributes' && mutation.attributeName === 'style')
+                )) {
+                    const targetTd = mutation.target.nodeType === 3 ? mutation.target.parentNode : mutation.target;
+                    if (targetTd && targetTd.classList.contains('cluster-question-item-data-label') && targetTd.dataset.persistedId) {
+                        console.log(`DEBUG: MutationObserver detected change on TD ${targetTd.dataset.persistedId}. Type: ${mutation.type}, Attribute: ${mutation.attributeName || 'N/A'}`);
+                        saveTdLabelState(targetTd.dataset.persistedId, targetTd.textContent.trim(), targetTd.style.backgroundColor);
+                    }
+                } else if (scriptEnabled) {
+                    // console.log(`DEBUG: MutationObserver detected non-relevant change or script disabled for ${td.dataset.persistedId}. Type: ${mutation.type}, Attribute: ${mutation.attributeName || 'N/A'}`);
+                }
+            });
+        });
+        observer.observe(td, { characterData: true, subtree: true, attributes: true, attributeFilter: ['style'] });
+    }
+
+    // 2. Event listener for Label Picker Buttons
+    document.addEventListener('click', (event) => {
+        if (!scriptEnabled) {
+            console.log("DEBUG: (Click Handler) Script disabled. Not processing click.");
+            return;
+        }
+        console.log("DEBUG: (Click Handler) Document click event detected. Checking for relevant button.");
+
+        let targetButton = event.target;
+        while (targetButton && targetButton !== document.body) {
+            if (targetButton.tagName === 'BUTTON' && targetButton.closest('.cluster-labels')) {
+                const key = getLabelButtonKey(targetButton);
+                if (key) {
+                    console.log(`DEBUG: (Click Handler) Relevant button clicked by user: ${key}`);
+                    // Increased delay to ensure the page's JS has fully updated the button's state (classes, styles)
+                    // before our script reads and saves it.
+                    setTimeout(() => {
+                        const isSelected = targetButton.classList.contains('selected');
+                        const backgroundColor = targetButton.style.backgroundColor;
+                        console.log(`DEBUG: (Click Handler) Delayed save for user click on button ${key}. IsSelected: ${isSelected}, BG: ${backgroundColor}`);
+                        saveLabelButtonState(key, isSelected, backgroundColor);
+
+                        if (key === 'clear-all-button') {
+                            console.log("DEBUG: (Click Handler) 'Clear all' button detected by user click. Proactively updating TD states in storage.");
+                             document.querySelectorAll('td.cluster-question-item-data-label[data-persisted-id]').forEach(td => {
+                                 saveTdLabelState(td.dataset.persistedId, '_', 'white'); // Assuming clear all resets to '_' and 'white'
+                             });
+                        }
+                    }, 200); // Increased to 200ms delay
+                    break;
+                }
+            }
+            targetButton = targetButton.parentNode;
+        }
+    }, true); // Use capture phase to ensure it runs before other handlers potentially stopping propagation
+
+    // --- Initialization ---
+    window.addEventListener('load', () => {
+        console.log("DEBUG: window.load event fired. Starting initialization.");
+        createToggleUI();
+        initializeTdLabelsAndObserve();
+        restoreAllStates();
+        console.log("DEBUG: Initialization complete.");
+    });
+
+})();
