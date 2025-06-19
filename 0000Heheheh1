@@ -21,6 +21,12 @@
 (function() {
     'use strict';
 
+    // Global variables for filter data - these were used in renderFilters but not defined in the provided script.
+    // They are initialized as empty sets. Populate these if you intend to use keyword/department/fit type filtering.
+    const departmentSet = new Set();
+    const keywordSet = new Set();
+    const fitTypeSet = new Set();
+
     // Apply styles immediately
     applyStyles();
 
@@ -41,6 +47,9 @@
 
     // Apply initial settings based on localStorage
     initial_settings();
+
+    // Run the delay check for department filters and render them
+    runWithDelay();
 
 
     // --- Function Definitions ---
@@ -160,6 +169,7 @@
             .filter_department:hover { background-color: #d0d0d0; }
             .filter_department.selected { background-color: #FFC107; color: black; }
             #department_filters { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
+            #keyword_filters, #fit_type_filters { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
         `);
     }
 
@@ -360,7 +370,7 @@ VEA ASIN_title: ${$gridItem.find('h4').text().trim()}
         window.currentSelectedDepartment = null;
 
         // Create helper tools container
-        $('#exclude').remove(); // This seems out of place, as #exclude is not created here. It might be a remnant.
+        $('#exclude').remove(); // This seems out of place, #exclude is not created here. It might be a remnant.
         if($("#helper_tools").length === 0) {
             let scriptTitleHtml = `<div id='script_title'><h2 style='font-size: 14px; margin-top:20px;padding:0,5em;color: #494949;border-bottom: solid 1px grey;'>GCO C2P MATCHING VAL SCRIPT v4.00</h2></div>`;
             if (this_url.indexOf("/channel/") > -1) {
@@ -371,7 +381,7 @@ VEA ASIN_title: ${$gridItem.find('h4').text().trim()}
             }
         }
 
-        // Create filter UI
+        // Create filter UI, including department, keyword, and fit type filter sections
         if($("#live-search").length === 0) {
             const html_info = `
                 <div id="filter_div">
@@ -399,10 +409,22 @@ VEA ASIN_title: ${$gridItem.find('h4').text().trim()}
                             <button style="font-size:16px; padding: 5px 10px; background-color: #e0e0e0; color: black; border: none; cursor: pointer;" id="SearchButton">Search</button>
                         </div>
                     </div>
+
+                    <div id="department_filters_container" style="margin-top: 20px;">
+                        <h4>Departments:</h4>
+                        <div id="department_filters"></div>
+                    </div>
+                    <div id="keyword_filters_container" style="margin-top: 20px;">
+                        <h4>Keywords:</h4>
+                        <div id="keyword_filters"></div>
+                    </div>
+                    <div id="fit_type_filters_container" style="margin-top: 20px;">
+                        <h4>Fit Types:</h4>
+                        <div id="fit_type_filters"></div>
+                    </div>
+                    <button id="rerun_translation_check" style="margin-top:10px; padding: 5px 10px;">🌐 Recheck</button>
                 </div>`;
-            if($("#filter_div").length == 0) {
-                $("#helper_tools").append(html_info);
-            }
+            $("#helper_tools").append(html_info);
         }
 
         // Main filter application function
@@ -699,6 +721,80 @@ VEA ASIN_title: ${$gridItem.find('h4').text().trim()}
     function verification_page() {
         console.log("verification_page triggered. (Implementation not provided in script)");
         // Add any logic here that should run when the verification page elements are ready
+    }
+
+    // renderFilters function - re-included as it was present in the original user's script
+    function renderFilters() {
+        departmentSet.clear();
+        keywordSet.clear();
+        fitTypeSet.clear();
+
+        $(".label-map-grid-item").each(function () {
+            const department = $(this).find("p:contains('department:')").text().replace("department:", "").trim();
+            if (department) departmentSet.add(department);
+
+            const keywords = $(this).find("p:contains('keywords:')").text().replace("keywords:", "").trim();
+            if (keywords) keywords.split(',').forEach(k => keywordSet.add(k.trim()));
+
+            const fitType = $(this).find("p:contains('fit_type:')").text().replace("fit_type:", "").trim();
+            if (fitType) fitTypeSet.add(fitType);
+        });
+
+        $("#department_filters").empty();
+        $("#keyword_filters").empty();
+        $("#fit_type_filters").empty();
+
+        departmentSet.forEach(dpt => {
+            const button = $(`<button class="filter_department" data-department="${dpt}">${dpt}</button>`);
+            button.on("click", function () {
+                $(".filter_department").removeClass("selected");
+                $(this).addClass("selected");
+                window.currentSelectedDepartment = $(this).data("department");
+                window.applyFilters();
+            });
+            $("#department_filters").append(button);
+        });
+
+        keywordSet.forEach(k => {
+            $("#keyword_filters").append(`<button class=\"filter_keyword\" data-keyword=\"${k}\">${k}</button>`);
+        });
+        fitTypeSet.forEach(ft => {
+            $("#fit_type_filters").append(`<button class=\"filter_fit\" data-fit=\"${ft}\">${ft}</button>`);
+        });
+
+        $(".filter_keyword").on("click", function () {
+            const sel = $(this).data("keyword").toLowerCase();
+            $(".label-map-grid-item").each(function () {
+                $(this).toggle($(this).text().toLowerCase().includes(sel));
+            });
+        });
+
+        $(".filter_fit").on("click", function () {
+            const sel = $(this).data("fit").toLowerCase();
+            $(".label-map-grid-item").each(function () {
+                $(this).toggle($(this).text().toLowerCase().includes(sel));
+            });
+        });
+
+        // 🌐 Recheck Button
+        $("#rerun_translation_check").on("click", function () {
+            const btn = $(this);
+            btn.css({ transform: 'rotate(0deg)', transition: 'transform 0.4s ease' });
+            setTimeout(() => {
+                btn.css('transform', 'rotate(360deg)');
+                setTimeout(() => renderFilters(), 400);
+            }, 0);
+        });
+    }
+
+    // runWithDelay function - re-included as it was present in the original user's script
+    function runWithDelay() {
+        const check = setInterval(() => {
+            if (document.querySelector("#department_filters")) {
+                clearInterval(check);
+                renderFilters();
+            }
+        }, 500);
     }
 
 })();
