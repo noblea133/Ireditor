@@ -1,0 +1,1954 @@
+
+// ==UserScript==
+// @name        GCO_C2P_MATCHING_VAL_SCRIPT_beta
+// @namespace   GCO_C2P_MATCHING_VAL_SCRIPT_beta
+// @include     https://ir-editor.amazon.com/questionHub/#/channel/*
+// @include     *://ir-editor.amazon.com/questionHub*
+// @include     https://ir-editor.amazon.com/questionHub/*
+// @match       *://ir-editor.amazon.com/questionHub*
+// @match       https://ir-editor.amazon.com/questionHub/*
+// @require     https://code.jquery.com/jquery-3.6.0.min.js
+// @require     https://gist.github.com/BrockA/2625891/raw/waitForKeyElements.js
+// @grant       none
+// @version     4.03b
+// @grant       GM_addStyle
+// @author      momonomu@ masayak@ lalocaba@ ashilkum@ rajvakas@
+// @description
+// @downloadURL https://drive.corp.amazon.com/view/GCO%20Tools/GCO_cluster_creation_VAL_script.user.js
+// @updateURL https://drive.corp.amazon.com/view/GCO%20Tools/GCO_cluster_creation_VAL_script.user.js
+// ==/UserScript==
+
+
+waitForKeyElements("awsui-button.label-map-question-submit", audit_page);
+waitForKeyElements("div.prompt-item", verification_page);
+
+function applyStyles() {
+  GM_addStyle(`
+    #settings_box {
+      display: none;
+      position: fixed;
+      top: 15%;
+      left: 40%;
+      background: white;
+      border: 1px solid black;
+      padding: 10px;
+      z-index: 777;
+      width: 300px;
+      box-shadow: 0 0 0 1000px rgba(0,0,0,.5);
+      box-shadow: 0 0 0 100vmax rgba(0,0,0,.5);
+    }
+
+    #settings_container {
+      padding: 10px;
+    }
+
+    #settings_header h2 {
+      padding: 5px;
+    }
+
+    #open_settings {
+      text-align: center;
+      width: auto;
+      margin: 3px;
+      padding: 3.5px;
+      background: white;
+      color: #545b64;
+      border: 1px solid #545b64;
+    }
+
+    #close_pop {
+      width: 60%;
+      text-align: center;
+      margin: auto;
+      padding: 8px 8px;
+      background: white;
+      color: #5c5c5c;
+      border: 1px solid #545b64;
+    }
+
+    #open_settings:hover, #close_pop:hover {
+      cursor: pointer;
+      background: whitesmoke;
+    }
+
+    .task-queue-header {
+      position: fixed;
+      z-index: 999;
+    }
+
+    .task-queue-content {
+      padding-top: 50px;
+    }
+
+    #button_grps {
+      background-color: white;
+      padding: 10px;
+      border: 1px solid black;
+    }
+
+    #button_grps button {
+      border: 1px solid transparent; /* 通常時は透明なボーダー */
+      padding: 5px 10px;
+      border: none;
+      cursor: pointer;
+    }
+
+    /* 赤系のボタン */
+    #select_no_btn:hover {
+      border: 1px solid rgba(255, 50, 50, 0.8); /* より濃い赤 */
+      cursor: pointer;
+      box-shadow: 0 0 3px rgba(255, 100, 100, 0.3);
+    }
+
+    /* オレンジ系のボタン */
+    #select_no_img:hover {
+      border: 1px solid rgba(255, 140, 0, 0.8); /* より濃いオレンジ */
+      cursor: pointer;
+      box-shadow: 0 0 3px rgba(255, 159, 0, 0.3);
+    }
+
+    /* グレー系のボタン */
+    #clear_btn:hover {
+      border: 1px solid rgba(160, 160, 160, 0.8); /* より濃いグレー */
+      cursor: pointer;
+      box-shadow: 0 0 3px rgba(160, 160, 160, 0.3);
+    }
+
+    #select_no_btn {
+      background-color: rgb(255, 100, 100);
+      color: black;
+    }
+
+    #select_no_img {
+      margin-left: 10px;
+      background-color: #ff9f00;
+      color: black;
+    }
+
+    #clear_btn {
+      margin-left: 10px;
+      background-color: #e0e0e0;
+      color: black;
+    }
+
+    #filter_div {
+      margin-bottom: 10px;
+    }
+
+    #filter_div input {
+      height: 30px;
+      width: 100%;
+    }
+
+    #filter_div button {
+      font-size: 16px;
+      margin-left: 10px;
+      padding: 5px 10px;
+      background-color: #e0e0e0;
+      color: black;
+      border: none;
+      cursor: pointer;
+    }
+
+    .table-wrapper {
+    margin-bottom: 20px;  /* Adjust this value to increase or decrease space */
+}
+
+    /* Your existing table styles */
+    #shortcut_keys table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+    }
+
+    #shortcut_keys th, #shortcut_keys td {
+        border: 1px solid #ddd;
+        padding: 8px;
+        text-align: left;
+    }
+
+    #shortcut_keys th {
+        background-color: #f2f2f2;
+        font-weight: bold;
+    }
+
+    #shortcut_keys tr:nth-child(even) {
+        background-color: #f9f9f9;
+    }
+    .val_img_id_btn {
+        background-color: rgba(0, 0, 0, 0.03); /* 非常に薄いグレー */
+        color: #555; /* ダークグレーのテキスト */
+        border: none;
+        border-radius: 3px; /* わずかな丸み */
+        padding: 2px 4px;
+        font: inherit;
+        font-size: 0.9em; /* 少し小さめのフォント */
+        cursor: pointer;
+        text-decoration: none;
+        display: inline-block;
+        margin: 0;
+        transition: all 0.3s ease;
+    }
+
+    .val_img_id_btn:hover {
+        background-color: rgba(0, 0, 0, 0.06); /* ホバー時は少し濃いグレー */
+        color: #333;
+    }
+
+    .val_img_id_btn:focus {
+        outline: none;
+        box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1);
+    }
+
+    /* アクセシビリティのため、フォーカス時の視覚的インジケータを追加 */
+    .val_img_id_btn:focus-visible {
+        box-shadow: 0 0 0 2px rgba(0, 102, 204, 0.3);
+    }
+
+  .filter_department {
+    margin: 5px;
+    padding: 5px 10px;
+    background-color: #e0e0e0;  /* 通常時は薄いグレー */
+    color: black;
+    border: none;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background-color 0.2s ease;
+  }
+
+  .filter_department:hover {
+    background-color: #d0d0d0;  /* ホバー時は少し濃いグレー */
+  }
+
+  .filter_department.selected {
+    background-color: #FFC107;  /* 選択時は黄金色 */
+    /* または #FFEB3B （より明るい黄色） */
+    /* または #FFC107 （アンバー色） */
+    color: black;               /* 黄色背景なので文字は黒に */
+  }
+
+  #department_filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 10px;
+  }
+  `);
+}
+
+// Call the function to apply styles
+applyStyles();
+
+waitForKeyElements("awsui-button.label-map-question-submit", audit_page);
+waitForKeyElements("div.prompt-item", verification_page);
+
+function get_image_url(this_url) {
+  const url_ptn = /._AC_UX220_/g;
+  const vpi_img = document.querySelector('.prompt-item > .label-map-item > img');
+  const vpi_img_url = vpi_img ? vpi_img.src : '';
+
+  // 共通のスタイル定義
+  const commonButtonStyle = {
+    'background-color': 'rgba(0, 0, 0, 0.03)',
+    'color': '#555',
+    'border': 'none',
+    'border-radius': '3px',
+    'padding': '2px 4px',
+    'font': 'inherit',
+    'font-size': '0.9em',
+    'cursor': 'pointer',
+    'text-decoration': 'none',
+    'display': 'inline-block',
+    'margin': '0',
+    'transition': 'all 0.3s ease'
+  };
+
+function add_image_url_and_chime() {
+    const img_url = $(this).attr('src');
+    if (!img_url) return;
+
+    const splitted_img_url = img_url.split('/');
+    const replaced_url = splitted_img_url[splitted_img_url.length - 1].split('.')[0];
+    const isChildAsin = !$(this).closest('.prompt-item').length;
+    const matchExists = isChildAsin && vpi_img_url.includes(img_url);
+    const enable_chime_btn = localStorage.getItem("enable_chime_btn") === "true";
+
+    let matchCount = 0;
+    if ($(this).closest('.prompt-item').length) {
+        matchCount = $('img').not('.prompt-item img').filter(function() {
+            return vpi_img_url.includes($(this).attr('src'));
+        }).length;
+    }
+
+    const new_html = `
+        <div style="display: flex; align-items: center; margin-top: 5px;">
+            <button class="val_img_id_btn" data_url="${img_url.replace(url_ptn, '')}">${replaced_url}</button>
+            ${matchCount > 0 ? `<span style="margin-left: 5px; background-color: rgba(0, 0, 0, 0.03); color: #555; font-size: 0.8em;">(${matchCount})</span>` : ''}
+            ${isChildAsin && enable_chime_btn ? '<button class="chime-button" style="margin-left: 5px;">Chime</button>' : ''}
+        </div>
+    `;
+
+    $(this).after(new_html);
+
+    if (matchExists) {
+        $(this).siblings('div').find('.val_img_id_btn').add('.prompt-item button.val_img_id_btn').each(function() {
+            const style = {...commonButtonStyle};
+            if (vpi_img_url.includes($(this).text())) {
+                style['background-color'] = '#fffdb3';
+                style['outline-color'] = '#dfd920';
+            }
+            $(this).css(style);
+        });
+    }
+
+    if (isChildAsin) {
+        $(this).siblings('div').find('.chime-button').css(commonButtonStyle);
+    }
+}
+
+
+  // 画像要素の処理
+  const selector = this_url.includes("/channel/") ?
+    "div.task-queue-content img" :
+    "img.label-map-question-template-item-image";
+  $(selector).each(add_image_url_and_chime);
+
+  // クリップボード関連の関数
+  function copyToClipboard(text) {
+    navigator.clipboard.writeText(text)
+      .then(() => console.log('Copied to clipboard:', text))
+      .catch(err => console.error('Failed to copy: ', err));
+  }
+
+  // ボタンクリックハンドラの修正
+  $(".val_img_id_btn").click(function(e) {
+      const data_url = $(this).attr('data_url');
+      if (!data_url) return;
+
+      const copy_image_id = localStorage.getItem("copy_image_id") === "true";
+
+      if (e.shiftKey) {
+          window.open(data_url, '_blank');
+      } else if (e.ctrlKey) {
+          e.preventDefault();
+          const tabName = 'tab_' + btoa(data_url).replace(/[^a-zA-Z0-9]/g, '');
+          window.open(data_url, tabName);
+      } else if (copy_image_id) {
+          // 設定が有効で通常のクリックの場合、Image ID をコピー
+          copyToClipboard($(this).text());
+      } else {
+          // 設定が無効の場合（デフォルト）、新しいタブで開く
+          window.open(data_url, '_blank');
+      }
+  });
+
+  // Chimeボタンのクリックハンドラ
+  function createChimeCopy($gridItem, payloadURL) {
+    const getTextContent = (selector, defaultValue = 'N/A') =>
+      $gridItem.find(selector).text().trim().split(':')[1]?.trim() || defaultValue;
+
+    return `Question: (Please type your questions here)
+
+Payload: ${payloadURL}
+Brand: ${getTextContent('p:contains("brand:")')}
+
+VPI model_name : ${$('.prompt-item p:contains("model_name:")').text().split(':')[1]?.trim() || 'N/A'}
+VPI IMG:${$('.prompt-item .label-map-item .val_img_id_btn').attr('data_url') || 'N/A'}
+
+VEA ASIN: ${$gridItem.find('div.label-map-item > span').attr('title') || 'N/A'}
+VEA IMG: ${$gridItem.find('.val_img_id_btn').attr('data_url') || 'N/A'}
+
+VEA model_name: ${getTextContent('p:contains("model_name:")')}
+VEA ASIN_title: ${$gridItem.find('h4').text().trim()}
+`;
+  }
+
+  $(".chime-button").click(function() {
+    const $gridItem = $(this).closest('.label-map-grid-item');
+    const channelId = $("div.task-queue-title > h2").text();
+          // slice()を使用する場合
+    const questionId = $('h5').text().trim().replace('Question: ', '').slice(0, 32);
+    const payloadURL = this_url.includes("/channel/") ?
+      `https://ir-editor.amazon.com/questionHub/#/channels/${channelId}/questions/${questionId}` :
+      this_url;
+
+    const chimeCopy = createChimeCopy($gridItem, payloadURL);
+    copyToClipboard(chimeCopy);
+    alert('Copied to clipboard:\n' + chimeCopy);
+  });
+}
+
+
+
+
+
+function create_settings(){
+  var this_url = window.location.href;
+
+
+  // Setting Menu // Added short cut keys 2025/12/11 momonomu@
+if($("#settings_box").length == 0) {
+var settings = `<span id='open_settings' style='font-size: 1.4rem;line-height:2rem;  font-weight: 700;border-radius: 2px;border: 1px solid; text-decoration: none;'>GCO VAL SCRIPT Settings</span>
+<div style='padding: 0px; margin: 0px 0px 0px 0px;'>
+    <div id='settings_box'>
+        <h3 style='font-size: 1em; font-weight: normal;'>Settings</h3>
+        <div id='settings_container'>
+            <div style='line-height: 1.3; text-align: left; font-size: 0.9em;'>
+                <div style='margin-left: 10px;'>
+                    <input type='checkbox' id='dpt_highlighter'>
+                    <label style='font-weight: normal;'>Department Highlighter for SL</label><br>
+
+                    <input type='checkbox' id='hide_skip_btn'>
+                    <label style='font-weight: normal;'>Hide Skip button</label><br>
+
+                    <input type='checkbox' id='disable_submit_btn'>
+                    <label style='font-weight: normal;'>Disable Submit button</label><br>
+
+                    <input type='checkbox' id='enable_dept_link'>
+                    <label style='font-weight: normal;'>Enable Department SOP Link</label><br>
+
+                    <input type='checkbox' id='enable_chime_btn'>
+                    <label style='font-weight: normal;'>Enable Chime Button</label><br>
+
+                    <input type='checkbox' id='copy_image_id'>
+                    <label style='font-weight: normal;'>Copy Image ID on Click (Default: Open in New Tab)</label><br>
+                </div>
+            </div>
+            <span style='display: none; font-size: 0.9em;' id='notice_box'><i>Reload the page</i></span>
+        </div>
+        <div id='shortcut_keys'>
+            <h4 style='font-size: 0.95em; font-weight: normal;'>Shortcut Keys:</h4>
+            <table style='font-size: 0.85em;'>
+                <tr>
+                    <th style='font-weight: normal;'>Shortcut</th>
+                    <th style='font-weight: normal;'>Action</th>
+                </tr>
+                <tr>
+                    <td>Shift + D</td>
+                    <td>No to Unselected</td>
+                </tr>
+                <tr>
+                    <td>Shift + C</td>
+                    <td>Unselect all ASINs</td>
+                </tr>
+                <tr>
+                    <td>Shift + F</td>
+                    <td>Full Payload</td>
+                </tr>
+                <tr>
+                    <td>Shift + Y</td>
+                    <td>Selected as Yes</td>
+                </tr>
+                <tr>
+                    <td>Shift + N</td>
+                    <td>Selected as No</td>
+                </tr>
+                <tr>
+                    <td>Shift + U</td>
+                    <td>Unselected</td>
+                </tr>
+            </table>
+        </div>
+
+        <div id="close_pop" style="margin-top: 20px; font-size: 0.9em;">Save and close</div>
+    </div>
+</div>`;
+}
+
+
+    if (this_url.indexOf("/channel/") > -1) {
+      $("div.task-queue-left > awsui-button").after(settings);
+    }else if(this_url.indexOf("/channels/") > -1) {
+      $("button.show-hide-user-answers-button").after(settings);
+    }
+
+
+ $("#open_settings").click(function() {
+    $("#settings_box").show();
+  });
+
+  $("#close_pop").click(function() {
+    $("#settings_box").hide();
+  });
+
+  $("#open_settings").hover(function() {
+    $(this).css({"cursor":"pointer", "background":"whitesmoke"});
+  }, function() {
+    $(this).css({"cursor":"normal", "background":"white"});
+  });
+
+  $("#close_pop").hover(function() {
+    $(this).css({"cursor":"pointer", "background":"whitesmoke"});
+  }, function() {
+    $(this).css({"cursor":"normal", "background":"white"});
+  });
+
+}
+
+function keyword_filter_init(this_url) {
+  // 特殊文字のエスケープパターン（"|" はOR検索用に除外）
+  const special_char_escape = /[.*+\-?^${}()[\]\\]/g;
+  window.currentSelectedDepartment = null;
+
+  // ヘルパーツールのコンテナを作成
+  $('#exclude').remove();
+  if($("#helper_tools").length === 0) {
+    if (this_url.indexOf("/channel/") > -1) {
+      $("div.label-map-answer-buttons").after(`
+        <div id='script_title'>
+          <h2 style='font-size: 14px; margin-top:20px;padding:0,5em;color: #494949;border-bottom: solid 1px grey;'>
+            GCO C2P MATCHING VAL SCRIPT v4.00
+          </h2>
+        </div>
+        <div id="helper_tools" style="margin:5px 0px; padding:20px; font-size:22px"></div>
+      `);
+    } else if (this_url.indexOf("/channels/") > -1) {
+      $("div.prompt-item").after(`
+        <div id='script_title'>
+          <h2 style='font-size: 14px; margin-top:100px;padding:0,5em;color: #494949;border-bottom: solid 1px grey;'>
+            GCO C2P MATCHING VAL SCRIPT v4.00
+          </h2>
+        </div>
+        <div id="helper_tools" style="margin:5px 0px; padding:20px; font-size:22px"></div>
+      `);
+    }
+  }
+
+  // フィルターUIの作成
+  if($("#live-search").length === 0) {
+    const html_info = `
+      <div id="filter_div">
+        <div style="display:flex; margin-bottom: 10px;">
+          <form id="live-search" action="" class="styled" method="post" style="flex-grow: 1;">
+            <input style="height:30px; width: 100%;" placeholder="Values to include" type="text" class="text-input" id="filter" value="">
+          </form>
+          <button style="font-size:16px; margin-left: 10px; padding: 5px 10px; background-color: #e0e0e0; color: black; border: none; cursor: pointer;" id="ClearIncludeSearch">Clear</button>
+        </div>
+
+        <div style="display:flex; margin-bottom: 10px;">
+          <form id="live-search-exclude" action="" class="styled" method="post" style="flex-grow: 1;">
+            <input style="height:30px; width: 100%;" placeholder="Values to exclude" type="text" class="text-input" id="filter_exclude" value="">
+          </form>
+          <button style="font-size:16px; margin-left: 10px; padding: 5px 10px; background-color: #e0e0e0; color: black; border: none; cursor: pointer;" id="ClearExcludeSearch">Clear</button>
+        </div>
+
+        <div>
+          <span style='font-size:16px;' id="filter-count"></span>
+          <div style="display: flex; justify-content: flex-end; align-items: center; margin-top: 10px;">
+            <label style="display: inline-flex; align-items: center; margin-right: 10px; white-space: nowrap;">
+              <input type="checkbox" id="searchOption" style="margin-right: 5px;">
+              <span style="font-size: 12px;">Enable Live Search</span>
+            </label>
+            <button style="font-size:16px; padding: 5px 10px; background-color: #e0e0e0; color: black; border: none; cursor: pointer;" id="SearchButton">Search</button>
+          </div>
+        </div>
+      </div>`;
+
+    if($("#filter_div").length == 0) {
+      $("#helper_tools").append(html_info);
+    }
+  }
+
+  // メインのフィルター適用関数
+  window.applyFilters = function() {
+    const filter = $("#filter").val();
+    const filter_exclude = $("#filter_exclude").val();
+    let filter_counter = 0;
+
+    $("div.label-map-template > div.label-map-items div.label-map-grid-item").each(function() {
+      const $item = $(this);
+      const text = $item.text();
+      let showItem = true;
+
+      // キーワードフィルターの適用
+      if (filter !== "" || filter_exclude !== "") {
+        const filterRegex = new RegExp(filter.replace(special_char_escape, '\\$&'), "i");
+        const excludeRegex = new RegExp(filter_exclude.replace(special_char_escape, '\\$&'), "i");
+
+        if (filter !== "" && filter_exclude === "") {
+          showItem = text.search(filterRegex) !== -1;
+        } else if (filter === "" && filter_exclude !== "") {
+          showItem = text.search(excludeRegex) === -1;
+        } else {
+          showItem = text.search(filterRegex) !== -1 && text.search(excludeRegex) === -1;
+        }
+      }
+
+      // 部門フィルターの適用
+      if (showItem && window.currentSelectedDepartment) {
+        showItem = $item.data("department") === window.currentSelectedDepartment;
+      }
+
+      // 表示/非表示の設定
+      $item.toggle(showItem);
+      if (showItem) filter_counter++;
+    });
+
+    // フィルターカウントの更新
+    if (filter.length > 0 || window.currentSelectedDepartment) {
+      const plural = filter_counter === 1 ? "" : "s";
+      $("#filter-count").text(`Found in ${filter_counter} ASIN${plural}`);
+    } else {
+      $("#filter-count").text("");
+    }
+  };
+
+  // クリアボタンのイベントハンドラ
+  $("#ClearIncludeSearch").click(function() {
+    $("#filter").val("");
+    window.applyFilters();
+  });
+
+  $("#ClearExcludeSearch").click(function() {
+    $("#filter_exclude").val("");
+    window.applyFilters();
+  });
+
+  // 検索ボタンのイベントハンドラ
+  $("#SearchButton").click(function() {
+    window.applyFilters();
+  });
+
+  // Live Search機能の制御
+  function enableLiveSearch() {
+    $("#filter, #filter_exclude").on('keyup', window.applyFilters);
+  }
+
+  function disableLiveSearch() {
+    $("#filter, #filter_exclude").off('keyup', window.applyFilters);
+  }
+
+  // Live Searchの初期設定
+  var enable_live_search = localStorage.getItem("enable_live_search");
+  if(enable_live_search === "true") {
+    $("#searchOption").prop("checked", true);
+    enableLiveSearch();
+  } else {
+    $("#searchOption").prop("checked", false);
+    disableLiveSearch();
+  }
+
+  // Live Searchオプションの変更ハンドラ
+  $('#searchOption').change(function() {
+    if($(this).is(":checked")) {
+      localStorage.setItem("enable_live_search", "true");
+      enableLiveSearch();
+    } else {
+      localStorage.setItem("enable_live_search", "false");
+      disableLiveSearch();
+    }
+  });
+
+  // 初期状態でのフィルター適用
+  window.applyFilters();
+}
+
+
+
+
+function department_highlighter(){
+
+  var department_attr_val;
+  var brand_attr_val;
+  var import_attr_val;
+  var selectBtn;
+  var groupColumn;
+  var attribute_title;
+  var disabled_dpt_category;
+  var disabled_brand_category;
+  var male_category;
+  var female_category;
+  var unisex_adult_category;
+  var boy_category;
+  var girl_category;
+  var baby_child_no_gender_category;
+  var unisex_category;
+  var baby_boy_category;
+  var baby_girl_category;
+  var child_no_gender_category;
+  var baby_no_gender_category;
+  var infant_category;
+  var disabled_nopieces_category;
+  var is_import_alerted;
+  var is_ASINs_clicked;
+
+  var seed_attr_title;
+  var additional_keyword;
+
+  var copy_ASIN = "";
+  var concat_ASIN ="";
+
+  disabled_brand_category = ["-","未設定","generic","genericbrands","unknown","n/a","不明","n\\a","missingbrand","na","なし","notapplicable","?????","unbekannt","確認中","n¥\a","n,a","n+a","n\\\\\\\\a","\n/a\\","other","blank",	"brandname",	"genericshop",	"generic1",	"artistunknown"];
+  disabled_dpt_category = ["toddler","大人","女士","男士","female","male","kids and adults","boy and men", "women and girl", "youth and child", "teenager and child","unisex",
+           "ユニセックス","男女兼用","メンズレディース","teen","キッド","ティーン","ジュニア","-",
+           "ベビー小物","ディース","レディース　メンズ　ユニセックス","メンズ　ユニセックス","レディース　ユニセックス","レディースパーカーストア","男式","女式",
+           "????","dummy_574", "シニア","others","中性","サバイバル","サバイバルブーツ","false","ユース","ユニセックス・ユース","???", "男女通用","なし","帽子","ショートパンツ",
+           "男tz", "女tz", "tz儿","dummy_001","ボーイズ ガールズ","ユニ大人","ユニアダルト","ユニキッズ","ユニ子供", "ユニベビー", "ユニ-ベビー","baby","bébé","bebê","bebek","Yeni Yürümeye Başlayan Çocuk","niemowlęta","bebis","Bebisar","bambini","ベビー^ベビー", "ベビー" ,"Bambini piccoli"];
+  male_category = ["herren","hombre","hombres","homme","uomo","heren","mannen","mezczyzni","dla meżczyzn","masculino","homens","herr","för män","män","erkekler","erkek","メンズ","男性","mens","men","men's","メンズ^メンズ","男性用"];
+  female_category = ["damen","mujer","mujeres","femme","donna","dames","vrouwen","vrouw","kobiety","kobiet","feminino","mulheres","för kvinnor","kvinna","kvinnor","damer","kadin","kadınlar","レディース","レディーズ","女性","women","womens","woman","womans","womens","women's","女性用","ウィメンズ"];
+  boy_category = ["ボーイズ","ボーイ","boys","boy","男子","男の子","boyz","boy's","少年","ボーイズ^ボーイズ","男童","男婴","男孩", "jungen","niño","niños","niños ","niño","garçon","ragazzo","jongens","chlopcy ","dla chłopców ","chlopak ","chłopiec","meninos","pojke ","pojk ","pojkar ","kille ","killar","erkek çocuk"];
+  girl_category = ["mädchen","niñas","niña","niñas","niña","fille","ragazza","meisjes","meiden","dziewczyny","meninas","flicka","flick","flickor","tjej","tjejer","kızlar","女童","女孩","ガールズ","ガール" ,"girls" ,"girl","女子","女の子","girl's","少女","ガールズ^ガールズ"];
+  unisex_adult_category = ["unisex–erwachsene","unisex adulto","adultos unisex","unisex adulto","adultos unisex","adulte unisexe","unisex - adulto","uniseks-volwassene","unisex dla dorosłych","uniseks dla dorosłych","dorośli, unisex","adulto-unissex","unisex - vuxen or unisex vuxna","üniseks yetiskin or uniseks-yetişkinler","unisex-adult","ユニセックス大人","unisexadult","ユニ・アダルト","ユニセックスアダルト","ユニセックス (大人)","男女兼用-大人","unisex-kid","unisex kid","unisex kids","unisex-kids"];
+  baby_boy_category = ["ベビーボーイズ","ベビー・ボーイズ","baby boys","baby-boys","baby-jungen","bebé-niños","bebé-niño","bebé-niños","bébé garçon","bambino","bimbo","baby-jongens","baby jongen","niemowleta-chlopcy","bebê-meninos","bebisar-pojkar","bebispojke","erkek bebek","男の子の赤ちゃん","赤ちゃん 男の子","ベビー-男の子","ベビー・男の子"];
+  baby_girl_category = ["baby girl","baby girls", "baby girl's","ベビーガールズ","ベビー・ガールズ","baby - mädchen","bebé-niñas ","bebé-niñas","bebé-niñas","bébé fille","bambina","bimbi","baby-meisjes","baby-meisje","niemowleta-dziewczynki","niemowlę-dziewczynka","bebê-meninas",
+        "bebisar - flickor","bebisflicka","kiz bebek","赤ちゃん 女の子","女の子の赤ちゃん"];
+  child_no_gender_category = ["unisex child","unisex-child","中性童","kind","kinder","enfant","bambini","bambino","kind","dziecko","dzieci","criança","barn","çocuk","unisex-child","ユニセックス子供","ユニセックス(子供)","ユニセックスキッズ","ユニセックス 子供" ,"ユニセックス（子共）","uniseks-kind","bambino","kid","kids","キッズ"];
+  baby_no_gender_category = ["unisex-baby","unisex baby","ユニセックスベビー" ,"unisex bebé"];
+  infant_category = ["infant"]
+
+
+$("div.label-map-grid-item div.label-map-item p:nth-child(6), div.prompt-item > div > p:nth-child(5),div.label-map-grid-item div.label-map-item p:nth-child(7), div.prompt-item > div > p:nth-child(6)").each(function(){
+
+  department_attr_val = $(this).text().replace("department:","");
+  department_attr_val = department_attr_val.toLowerCase();
+  department_attr_val = department_attr_val.replace(/\s+/g, "");
+  department_attr_val = department_attr_val.replace(/―/g,"");
+  department_attr_val = department_attr_val.replace(/・/g,"");
+  department_attr_val = department_attr_val.replace(/\(/g,"");
+  department_attr_val = department_attr_val.replace(/\)/g,"");
+  department_attr_val = department_attr_val.replace(/\（/g,"");
+  department_attr_val = department_attr_val.replace(/\）/g,"");
+  department_attr_val = department_attr_val.replace(/\-/g,"");
+  department_attr_val = department_attr_val.replace(/\'/g,"");
+
+
+  //console.log(department_attr_val);
+
+
+  if ($.inArray(department_attr_val, disabled_dpt_category) !== -1 ) {
+    $(this).css({"background-color":"#6B6B6B"});
+  // 男
+  } else if ($.inArray(department_attr_val, male_category) !== -1 ) {
+    //console.log(department_attr_val);
+    //console.log($(this).children());
+    $(this).css({"background-color":"#7CDFF4"});
+  // 女
+  } else if ($.inArray(department_attr_val, female_category) !== -1 ) {
+    //console.log(department_attr_val);
+    //console.log($(this).children());
+    $(this).css({"background-color":"#B0F98B"});
+  // ユニセックス大人
+  } else if ($.inArray(department_attr_val, unisex_adult_category) !== -1 ) {
+    //console.log(department_attr_val);
+    //console.log($(this).children());
+    $(this).css({"background-color":"#C689FD"});
+    //$(this).parent().siblings("td.cluster-question-item-data-label").addClass("dpt unisex_adult_category");
+  // ボーイズ
+  }　else if ($.inArray(department_attr_val, boy_category) !== -1 ) {
+    //console.log(department_attr_val);
+    //console.log($(this).children());
+    $(this).css({"background-color":"#FFF0B1"});
+    //$(this).parent().siblings("td.cluster-question-item-data-label").addClass("dpt boy_category");
+  // ガールズ
+  } else if ($.inArray(department_attr_val, girl_category) !== -1 ) {
+    //console.log(department_attr_val);
+    //console.log($(this).children());
+    $(this).css({"background-color":"#FFB9F5"});
+    //$(this).parent().siblings("td.cluster-question-item-data-label").addClass("dpt girl_category");
+  // ユニセックス子供
+  } else if ($.inArray(department_attr_val, baby_child_no_gender_category) !== -1 ) {
+    //console.log(department_attr_val);
+    //console.log($(this).children());
+    $(this).css({"background-color":"#F6B589"});
+    //$(this).parent().siblings("td.cluster-question-item-data-label").addClass("dpt baby_child_no_gender_category");
+  // ベビーボーイズ
+  } else if ($.inArray(department_attr_val, baby_boy_category) !== -1 ) {
+    //console.log(department_attr_val);
+    //console.log($(this).children());
+    $(this).css({"background-color":"#A2C4AC"});
+    //$(this).parent().siblings("td.cluster-question-item-data-label").addClass("dpt baby_boy_category");
+  // ベビーガールズ
+  } else if ($.inArray(department_attr_val, baby_girl_category) !== -1 ) {
+    //console.log(department_attr_val);
+    //console.log($(this).children());
+    $(this).css({"background-color":"#FA818D"});
+    //$(this).parent().siblings("td.cluster-question-item-data-label").addClass("dpt baby_girl_category");
+    // ユニセックスベビー
+  } else if ($.inArray(department_attr_val, baby_no_gender_category) !== -1 ) {
+    //console.log(department_attr_val);
+    //console.log($(this).children());
+    $(this).css({"background-color":"#AC0065"});
+    //$(this).parent().siblings("td.cluster-question-item-data-label").addClass("dpt baby_no_gender_category");
+  // ユニセックス子供
+  } else if ($.inArray(department_attr_val, child_no_gender_category) !== -1 ) {
+    //console.log(department_attr_val);
+    //console.log($(this).children());
+    $(this).css({"background-color":"#0065ac"});
+    //$(this).parent().siblings("td.cluster-question-item-data-label").addClass("dpt baby_no_gender_category");
+  // ユニセックス
+  } else if ($.inArray(department_attr_val, unisex_category) !== -1 ) {
+    //console.log(department_attr_val);
+    //console.log($(this).children());
+    $(this).css({"background-color":"#F779FF"});
+    //$(this).parent().siblings("td.cluster-question-item-data-label").addClass("dpt unisex_category");
+  // infant
+  } else if ($.inArray(department_attr_val, infant_category) !== -1 ) {
+    //console.log(department_attr_val);
+    //console.log($(this).children());
+    $(this).css({"background-color":"#65ac00"});
+    //$(this).parent().siblings("td.cluster-question-item-data-label").addClass("dpt unisex_category");
+  }
+});
+
+
+}
+
+
+function hide_skip_button(){
+    // Hide SKIP button
+    $("awsui-button.label-map-question-skip").hide();
+}
+
+
+function disable_submit(){
+    // disable submit button until you answer all ASINs
+  // Change Submit Button color
+  function change_css(){
+    if($(".label-map-question-submit .awsui-button-icon").length){
+      $(".label-map-question-submit > button[type='submit']").css({"opacity":"1.0","background-color":"grey","pointer-events":"none"});
+      $(".label-map-question-submit > button[type='submit']").css({"border-color":"grey"});
+      $(".label-map-question-submit > button[type='submit']").prop("disabled", true);
+      $(".label-map-question-submit .awsui-button-icon").css({"opacity":"1.0","background-color":"grey","pointer-events":"none"});
+      $(".label-map-question-submit .awsui-button-icon").prop("disabled", true);
+    }else{
+      $(".label-map-question-submit > button[type='submit']").css({"opacity":"1.0","background-color":"green","pointer-events":"auto"});
+      $(".label-map-question-submit > button[type='submit']").css({"border-color":"green"});
+      $(".label-map-question-submit > button[type='submit']").prop("disabled", false); // 2025/08/08 by momonomu@
+       $(".label-map-question-submit .awsui-button-icon").prop("disabled", false);
+    }
+  }
+　$(document).ready(function() {
+      change_css()
+  });
+  $(document).click(function() {
+      change_css()
+  });
+
+}
+
+
+function initial_settings(){
+var dpt_highlighter = localStorage.getItem("dpt_highlighter");
+var hide_skip_btn = localStorage.getItem("hide_skip_btn");
+var disable_submit_btn = localStorage.getItem("disable_submit_btn");
+var enable_dept_link = localStorage.getItem("enable_dept_link");
+var enable_chime_btn = localStorage.getItem("enable_chime_btn");
+var copy_image_id = localStorage.getItem("copy_image_id");　// 2025/02/13
+
+  // Highlight Department Values by Category //////////////////////////////////////////
+  // Let's check the initial settings of this guy
+  if(dpt_highlighter === null) {
+    localStorage.setItem("dpt_highlighter", "false");
+    $("#dpt_highlighter").prop("checked", false);
+  } else if(dpt_highlighter == "true") {
+    $("#dpt_highlighter").prop("checked", true);
+  } else {
+    $("#dpt_highlighter").prop("checked", false);
+  }
+  // Check/uncheck settings change
+  $('#dpt_highlighter').click(function () {
+    $("#notice_box").show().delay(1000).fadeOut();
+    if ($(this).prop('checked')) {
+         localStorage.setItem("dpt_highlighter", "true");
+    } else {
+         localStorage.setItem("dpt_highlighter", "false");
+    }
+  });
+
+  if(dpt_highlighter === "true") {
+    department_highlighter();
+  }
+
+  if(hide_skip_btn === null) {
+    localStorage.setItem("hide_skip_btn", "false");
+    $("#hide_skip_btn").prop("checked", false);
+  } else if(hide_skip_btn == "true") {
+    $("#hide_skip_btn").prop("checked", true);
+  } else {
+    $("#hide_skip_btn").prop("checked", false);
+  }
+  // Check/uncheck settings change
+  $('#hide_skip_btn').click(function () {
+    $("#notice_box").show().delay(1000).fadeOut();
+    if ($(this).prop('checked')) {
+         localStorage.setItem("hide_skip_btn", "true");
+    } else {
+         localStorage.setItem("hide_skip_btn", "false");
+    }
+  });
+    if(hide_skip_btn === "true") {
+    hide_skip_button();
+  }
+
+  if(disable_submit_btn === null) {
+    localStorage.setItem("disable_submit_btn", "false");
+    $("#disable_submit_btn").prop("checked", false);
+  } else if(disable_submit_btn == "true") {
+    $("#disable_submit_btn").prop("checked", true);
+  } else {
+    $("#disable_submit_btn").prop("checked", false);
+  }
+  // Check/uncheck settings change
+  $('#disable_submit_btn').click(function () {
+    $("#notice_box").show().delay(1000).fadeOut();
+    if ($(this).prop('checked')) {
+         localStorage.setItem("disable_submit_btn", "true");
+    } else {
+         localStorage.setItem("disable_submit_btn", "false");
+    }
+      });
+    if(disable_submit_btn === "true") {
+      disable_submit();
+    }
+
+    if(enable_dept_link === null) {
+        localStorage.setItem("enable_dept_link", "false");
+        $("#enable_dept_link").prop("checked", false);
+    } else if(enable_dept_link == "true") {
+        $("#enable_dept_link").prop("checked", true);
+    } else {
+        $("#enable_dept_link").prop("checked", false);
+    }
+
+    // Check/uncheck settings change
+    $('#enable_dept_link').click(function () {
+        $("#notice_box").show().delay(1000).fadeOut();
+        if ($(this).prop('checked')) {
+            localStorage.setItem("enable_dept_link", "true");
+        } else {
+            localStorage.setItem("enable_dept_link", "false");
+        }
+    });
+
+    if(enable_dept_link === "true") {
+        addDepartmentLink();
+    }
+
+  // 2025/02/07
+   if(enable_chime_btn === null) {
+    localStorage.setItem("enable_chime_btn", "true"); // デフォルトで有効
+    $("#enable_chime_btn").prop("checked", true);
+  } else if(enable_chime_btn == "true") {
+    $("#enable_chime_btn").prop("checked", true);
+  } else {
+    $("#enable_chime_btn").prop("checked", false);
+  }
+
+  // Chimeボタンの設定変更時の処理
+  $('#enable_chime_btn').click(function () {
+    $("#notice_box").show().delay(1000).fadeOut();
+    if ($(this).prop('checked')) {
+      localStorage.setItem("enable_chime_btn", "true");
+    } else {
+      localStorage.setItem("enable_chime_btn", "false");
+    }
+  });
+
+
+    // Image Button の動作設定
+  var copy_image_id = localStorage.getItem("copy_image_id");
+
+  if(copy_image_id === null) {
+    localStorage.setItem("copy_image_id", "false");
+    $("#copy_image_id").prop("checked", false);
+  } else if(copy_image_id == "true") {
+    $("#copy_image_id").prop("checked", true);
+  } else {
+    $("#copy_image_id").prop("checked", false);
+  }
+
+  $('#copy_image_id').click(function () {
+    $("#notice_box").show().delay(1000).fadeOut();
+    if ($(this).prop('checked')) {
+      localStorage.setItem("copy_image_id", "true");
+    } else {
+      localStorage.setItem("copy_image_id", "false");
+    }
+  });
+}
+
+//modified by lalocaba@ added the posibility to filter by yes, no and department//
+
+function display_asin_info() {
+  var number_of_ASIN = $("div.label-map-grid-item").length;
+  var selected_yes = 0, selected_no = 0, selected_count = 0, remaining_count = number_of_ASIN;
+
+
+  if ($("#filter_buttons").length === 0) {
+    $("div.label-map-answer-buttons").after(`
+           <div id="filter_buttons" style="display: flex; flex-direction: column; gap: 10px; padding: 10px;">
+      <button id="filter_full_payload" style="display: inline-block; padding: 6px 12px; font-size: 14px; background-color:#E6E6E6; color: black; border: none; cursor: pointer; border-radius: 4px;">
+        Full Payload: <span id="full_payload_count">${number_of_ASIN}</span>
+      </button>
+      <button id="filter_yes_count" style="display: inline-block; padding: 6px 12px; font-size: 14px; background-color:#4CAF50; color: white; border: none; cursor: pointer; border-radius: 4px;">
+        Selected as Yes: <span id="yes_count">0</span>
+      </button>
+      <button id="filter_no_count" style="display: inline-block; padding: 6px 12px; font-size: 14px; background-color:#f44336; color: white; border: none; cursor: pointer; border-radius: 4px;">
+        Selected as No: <span id="no_count">0</span>
+      </button>
+      <button id="filter_unselected" style="display: inline-block; padding: 6px 12px; font-size: 14px; background-color:#e6e6e6; color: black; border: none; cursor: pointer; border-radius: 4px;">
+        Unselected: <span id="unselected_count">${number_of_ASIN}</span>
+      </button>
+      <div id="department_filters" style="margin-top: 5px;">
+        <!-- Department filters will be appended here dynamically -->
+      </div>
+    </div>
+  `);
+
+    // Set default selection for Full Payload button
+    $("#filter_full_payload").css("border", "2px solid #000000");
+  }
+  // Department counts
+  const departmentCounts = {};
+  const departmentList = new Set();
+
+  // Track departments and count occurrences by lalocaba@
+  $("div.label-map-grid-item").each(function () {
+    const text = $(this).text();
+    const departmentMatch = text.match(/department:\s*([^:]+)(?:\s*brand|$)/i);
+    let department = departmentMatch ? departmentMatch[1].trim() : "No Department";
+
+     if (!department) {
+      department = "<i>No department</i>";
+     }
+
+    $(this).attr("data-department", department);
+    departmentList.add(department);
+    departmentCounts[department] = (departmentCounts[department] || 0) + 1;
+  });
+
+  // Create department filter buttons
+// 部門フィルターボタンの作成
+for (const [dept, count] of Object.entries(departmentCounts)) {
+  $("#department_filters").append(`
+    <button class="filter_department" data-department="${dept}">
+      ${dept}: <span>${count}</span>
+    </button>
+  `);
+}
+
+
+
+    selected_yes = 0;
+    selected_no = 0;
+    selected_count = $("div.label-map-label-button[style*='rgb(255, 255, 255)']").length;
+
+  // Change colors for Yes/No button and backgrounds & add Selected Class // momonomu@ improvised Lalo's code :) 2025/11/26
+  // Function to update counters
+  // Color definitions // Suggested by masayak@
+  const BLUE = "rgb(100, 200, 255)";
+  const RED = "rgb(255, 100, 100)";
+  const WHITE = "rgb(255, 255, 255)";
+  const LIGHT_BLUE = "rgba(202, 236, 255)";
+  const LIGHT_RED = "rgba(255, 227, 227)";
+
+  // Function to update counters
+  // 202506 masayak - update selector and replate nth-child to contains
+  function updateCounters() {
+    // const selectedYes = $("div.label-map-grid-item > div > div.label-map-label-button:nth-child(1).selected").length;
+    // const selectedNo = $("div.label-map-grid-item > div > div.label-map-label-button:nth-child(2).selected").length;
+    const selectedYes = $("div.label-map-grid-item > div > div > div.label-map-label-button:contains('Yes, this belongs to the VPI').selected").length;
+    const selectedNo = $("div.label-map-grid-item > div > div > div.label-map-label-button:contains('No, this does not belong to the VPI').selected").length;
+    $("#yes_count").text(selectedYes);
+    $("#no_count").text(selectedNo);
+    $("#filter_unselected").text("Unselected: " + (number_of_ASIN - selectedYes - selectedNo));
+  }
+
+  // Function to handle button click
+  function handleButtonClick(button, activeColor, inactiveColor, bgColor) {
+    const $button = $(button);
+    // 202506 masayak
+    // const $sibling = $button.siblings('.label-map-label-button');
+    const $sibling = $button.parent().siblings().children('.label-map-label-button');
+    const $gridItem = $button.closest(".label-map-grid-item");
+
+    $sibling.removeClass('selected');
+
+    if ($button.css("background-color") === activeColor) {
+      if ($sibling.css("background-color") === WHITE) {
+        // Unselect both buttons
+        $button.css({"background-color": activeColor});
+        $sibling.css({"background-color": inactiveColor});
+        $gridItem.css({"background-color": WHITE});
+        $button.removeClass('selected');
+      } else {
+        // Select this button
+        $sibling.css({"background-color": WHITE});
+        $gridItem.css({"background-color": bgColor});
+        $button.addClass('selected');
+      }
+    } else if ($button.css("background-color") === WHITE) {
+      // Select this button
+      $button.css({"background-color": activeColor});
+      $sibling.css({"background-color": WHITE});
+      $gridItem.css({"background-color": bgColor});
+      $button.addClass('selected');
+    }
+
+    updateCounters();
+  }
+
+// Yes button click handler
+// 202506 masayak
+// $("div.label-map-grid-item > div > div.label-map-label-button:nth-child(1)").click(function() {
+$("div.label-map-grid-item > div > div > div.label-map-label-button:contains('Yes, this belongs to the VPI')").click(function() {
+  handleButtonClick(this, BLUE, RED, LIGHT_BLUE);
+});
+
+// No button click handler
+// $("div.label-map-grid-item > div > div.label-map-label-button:nth-child(2)").click(function() {
+$("div.label-map-grid-item > div > div > div.label-map-label-button:contains('No, this does not belong to the VPI')").click(function() {
+  handleButtonClick(this, RED, BLUE, LIGHT_RED);
+});
+
+  // 202506 masayak
+  // "Selected as Yes" button
+  $("#filter_yes_count").click(function () {
+    $("#filter_buttons button").css("border", "none");  // Remove border from all buttons
+    $(this).css("border", "2px solid #000000");  // Add border to selected button
+    $("div.label-map-grid-item").each(function() {
+      if (!$(this).find("div.label-map-label-button:contains('Yes, this belongs to the VPI')").hasClass("selected")) {
+        $(this).hide();
+      } else {
+        $(this).show();
+      }
+    });
+  });
+
+  // 202506 masayak
+  // "Selected as No" button
+  $("#filter_no_count").click(function () {
+        $("#filter_buttons button").css("border", "none");  // Remove border from all buttons
+    $(this).css("border", "2px solid #000000");  // Add border to selected button
+    $("div.label-map-grid-item").each(function () {
+      if (!$(this).find("div.label-map-label-button:contains('No, this does not belong to the VPI')").hasClass("selected")) {
+          $(this).hide();
+        } else {
+          $(this).show();
+      }
+       });
+  });
+
+  // "Unselected" button
+  $("#filter_unselected").click(function () {
+    $("#filter_buttons button").css("border", "none");  // Remove border from all buttons
+    $(this).css("border", "2px solid #000000");  // Add border to selected button
+    $("div.label-map-grid-item").each(function() {
+      if (!$(this).find("div.label-map-label-button:nth-child(2)").hasClass("selected") && !$(this).find("div.label-map-label-button:nth-child(1)").hasClass("selected")) {
+      // Hide the grid item
+      //$(this).hide();
+         $(this).show();
+      } else {
+      // Show the grid item
+     // $(this).show();
+        $(this).hide();
+  }
+  });
+
+  });
+
+  // Event listener for department filter buttons
+
+  // 部門フィルターのイベントハンドラ
+//$(document).on("click", ".filter_department", function () {
+$(".filter_department").click(function() {
+  const department = $(this).data("department");
+
+  if ($(this).hasClass("selected")) {
+    // 既に選択されているボタンをクリックした場合は選択解除
+    $(this).removeClass("selected");
+    window.currentSelectedDepartment = null;
+    $("#filter_full_payload").css("border", "2px solid #000000");
+  } else {
+    // 新しいボタンを選択
+    $(".filter_department").removeClass("selected");
+    $("#filter_buttons > button").css("border", "none");
+    $(this).addClass("selected");
+    window.currentSelectedDepartment = department;
+  }
+
+  // キーワードフィルターを含めて再適用
+  if (typeof window.applyFilters === 'function') {
+    window.applyFilters();
+  } else {
+    $("div.label-map-grid-item").each(function () {
+      $(this).toggle($(this).data("department") === department);
+    });
+  }
+});
+
+// Full Payloadボタンのクリックハンドラも修正
+$("#filter_full_payload").click(function() {
+  window.currentSelectedDepartment = null;
+  $(".filter_department").removeClass("selected");
+  $("#filter_buttons button").css("border", "none");
+  $(this).css("border", "2px solid #000000");
+  $("div.label-map-grid-item").show();
+  if (typeof window.applyFilters === 'function') {
+    $("#filter").val("");
+    $("#filter_exclude").val("");
+    window.applyFilters();
+  }
+});
+
+
+
+  // Automatically trigger click event for Full Payload button
+$("#filter_full_payload").click(function() {
+  window.currentSelectedDepartment = null;
+  $("#filter").val("");
+  $("#filter_exclude").val("");
+  window.applyFilters();
+  $("#filter_buttons button").css("border", "none");
+  $(this).css("border", "2px solid #000000");
+});
+
+
+  //updateCounters();
+}
+
+function val_buttons(this_url){
+    if (this_url.indexOf("/channel/") > -1) {
+    if($("#button_grps").length == 0) {
+      $("#open_settings").after(`
+      <div id="button_grps" style="font-size: 1.4rem; line-height: 2rem; font-weight: 700;background-color: white; padding: 10px; border: 0.5px solid lightgrey;border-radius: 2px;">
+        <button id="select_no_btn">No to Unselected</button>
+        <button id="select_no_img">No to No Image ASINs</button>
+        <button id="clear_btn">Unselect all ASINs</button>
+      </div>
+      `);
+    }
+  }
+
+  // Updated on 2025/09/20 by momonomu@
+  $("#select_no_btn").click(function(){
+    // 202506 masayak
+    // $("div.label-map-grid-item > div:nth-child(2) > div:nth-child(2)").each(function(){
+    $("div.label-map-grid-item > div > div > div.label-map-label-button:contains('No, this does not belong to the VPI')").each(function(){
+      if($(this).is(":visible")) {
+        console.log($(this));
+        //if(!($(this).find(".stroke-linejoin-round").length)){
+      if(!($(this).find(".stroke-linejoin-round").length) && !($(this).parent().siblings().children().find(".stroke-linejoin-round").length)){
+          $(this).click();
+        }
+      }
+    });
+  });
+
+  // 202506 masayak
+  // $("#clear_btn").click(function(){
+  //   $("div.label-map-grid-item > div:nth-child(2) > div:nth-child(1), div.label-map-grid-item > div:nth-child(2) > div:nth-child(2)").each(function(){
+  //     if($(this).find(".stroke-linejoin-round").length){
+  //       $(this).click();
+  //     }
+  //   });
+  $("#clear_btn").click(function(){
+    $("div.label-map-grid-item > div > div > div.label-map-label-button.selected").each(function(){
+      if($(this).find(".stroke-linejoin-round").length){
+        $(this).click();
+      }
+    });
+
+    //$("div.selected").click();
+  });
+
+  /////////// New function for review starts here /////////////
+  //2025/12/10 ashilkum@ updated by masayak@
+  // Function to check if an image is truly a 404 error
+  function isTrueImageError(img_elm) {
+      return img_elm.complete &&
+          img_elm.naturalWidth === 0 &&
+          img_elm.naturalHeight === 0 &&
+          // Ensure it's not just a not-yet-loaded image
+          img_elm.src.match(/\.(jpg|jpeg)$/i);
+  }
+
+  function clickAllNoButtonsForNoImg() {
+    let num_of_buttons = 0;
+      // $('.label-map-grid-item').each(function() {
+      //   if($(this).find('img').attr('src').includes('no-img-sm.gif') || isTrueImageError($(this).find('img')[0])) {
+      //     $(this).find('div:nth-child(2) > div:nth-child(2)').click();
+      //     console.log($(this).find('div:nth-child(2) > div:nth-child(2)'));
+      //     num_of_buttons = num_of_buttons + 1;
+      //   }
+      // })
+    // 202506 masayak
+    // $("div.label-map-grid-item > div:nth-child(2) > div:nth-child(2)").each(function(){
+    $("div.label-map-grid-item > div > div > div.label-map-label-button:contains('No, this does not belong to the VPI')").each(function(){
+      if($(this).is(":visible")) {
+        if($(this).parents("div.label-map-grid-item").find('img').attr('src').includes('no-img-sm.gif') || isTrueImageError($(this).parents("div.label-map-grid-item").find('img')[0])){
+          //if(!($(this).find(".stroke-linejoin-round").length) && !($(this).siblings().find(".stroke-linejoin-round").length)){
+          if(!($(this).find(".stroke-linejoin-round").length)){ // Bug fixed on 2025/12/18 v.4.71
+              $(this).click();
+              num_of_buttons = num_of_buttons + 1;
+            }
+        }
+      }
+    });
+    console.log('Number of no image asins:', num_of_buttons);
+  }
+
+  $("#select_no_img").click(clickAllNoButtonsForNoImg);
+
+  /////////// New function for review ends here /////////////
+
+  //2025/11/25 momonomu@
+  /*
+    $(".copy-img-id").click(function() {
+      var image_id = $(this).prev().text();
+      navigator.clipboard.writeText(image_id);
+      alert("Copied image ID: " + image_id);
+    });
+    */
+
+}
+
+function ImageComparison() {
+    function setupImageComparison() {
+        const isVerificationPage = window.location.href.indexOf("/channels/") > -1;
+        console.log("Is verification page:", isVerificationPage);
+
+        function getLeftImageHref() {
+            let leftImageElement;
+            if (isVerificationPage) {
+                leftImageElement = document.querySelector("div.prompt-item button.val_img_id_btn");
+            } else {
+                leftImageElement = document.querySelector("div.task-queue-content button.val_img_id_btn");
+            }
+            console.log("Left image element:", leftImageElement);
+            if (!leftImageElement) {
+                console.error("Left image element not found");
+                return null;
+            }
+            return leftImageElement.getAttribute('data_url');
+        }
+
+        function getRightImageHref(element) {
+            const anchorElement = element.closest('div.label-map-item').querySelector('button.val_img_id_btn');
+            if (!anchorElement) {
+                console.error("Right image anchor element not found");
+                return null;
+            }
+            return anchorElement.getAttribute('data_url');
+        }
+
+        function compareImages(element) {
+            console.log("Comparing images");
+            const rightImageUrl = getRightImageHref(element);
+            const leftImageUrl = getLeftImageHref();
+            console.log("Left image URL:", leftImageUrl);
+            console.log("Right image URL:", rightImageUrl);
+            if (leftImageUrl && rightImageUrl) {
+                showComparisonPopup(leftImageUrl, rightImageUrl);
+            } else {
+                console.error("Unable to retrieve both images for comparison.");
+                alert("Unable to retrieve both images for comparison.");
+            }
+        }
+
+        function showComparisonPopup(leftImageUrl, rightImageUrl) {
+            console.log("Showing comparison popup");
+            const modal = document.createElement("div");
+            modal.style.position = "fixed";
+            modal.style.top = "0";
+            modal.style.left = "0";
+            modal.style.width = "100vw";
+            modal.style.height = "100vh";
+            modal.style.backgroundColor = "rgba(0, 0, 0, 0.8)";
+            modal.style.zIndex = "10000";
+            modal.style.display = "flex";
+            modal.style.alignItems = "center";
+            modal.style.justifyContent = "center";
+            modal.style.flexDirection = "column";
+            modal.innerHTML = `
+                <h3 style="color: white;">Image Comparison</h3>
+                <div style="display: flex; justify-content: space-around; width: 90%; max-width: 1200px;">
+                    <div style="flex: 1; margin-right: 20px;">
+                        <img src="${leftImageUrl}" alt="Left Image" style="width: 100%; height: auto; max-height: 90vh; object-fit: contain;">
+                        <p style="color: white; text-align: center;">Left Image</p>
+                    </div>
+                    <div style="flex: 1;">
+                        <img src="${rightImageUrl}" alt="Right Image" style="width: 100%; height: auto; max-height: 90vh; object-fit: contain;">
+                        <p style="color: white; text-align: center;">Right Image</p>
+                    </div>
+                </div>
+                <button id="closeModal" style="margin-top: 20px; padding: 10px 20px; background-color: #007bff; color: white; border: none; cursor: pointer; border-radius: 4px;">Close</button>
+            `;
+            document.body.appendChild(modal);
+
+            function closeModal() {
+                modal.remove();
+                document.removeEventListener('keydown', handleEscKey);
+            }
+
+            function handleEscKey(event) {
+                if (event.key === "Escape") {
+                    closeModal();
+                }
+            }
+
+            // モーダルの外側をクリックした時の処理　by takashe@ on 2025/01/23
+            modal.addEventListener('click', (event) => {
+                if (event.target === modal) {
+                    closeModal();
+                }
+            });
+
+            document.getElementById("closeModal").addEventListener('click', closeModal);
+            document.addEventListener('keydown', handleEscKey);
+        }
+
+        console.log("Setting up image comparison");
+        const imgSelector = `div.label-map-grid-item img`;
+        const imgElements = document.querySelectorAll(imgSelector);
+        console.log("Found image elements:", imgElements.length);
+
+        if (imgElements.length === 0) {
+            console.error("No image elements found with selector:", imgSelector);
+        }
+
+        imgElements.forEach((imgElement, index) => {
+            console.log(`Setting up listener for image ${index + 1}`);
+            imgElement.style.cursor = "pointer";
+            imgElement.addEventListener('click', (event) => {
+                event.preventDefault();
+                console.log(`Image ${index + 1} clicked`);
+                compareImages(imgElement);
+            });
+        });
+    }
+
+    console.log("Starting ImageComparison function");
+    setupImageComparison();
+}
+
+// PI-55007 // Hyperlinking VAL tool with SOP for translation of Department values
+function addDepartmentLink() {
+  const targetUrl = 'https://w.amazon.com/bin/view/Testingcpdsl/Appendix&usecase/#HDepartment28InterimTranslationissuesolutionforLAPAssociates29';
+
+  $('div.awsui-util-container-header.label-map-question-template-header b:contains("department:")').wrap(
+    $('<a>', {
+      href: targetUrl,
+      rel: 'noopener noreferrer'
+    }).on('click', function(e) {
+      e.preventDefault();
+
+      // ウィンドウの位置を画面中央に設定
+      const width = 1000;
+      const height = 800;
+      const left = (window.screen.width - width) / 2;
+      const top = (window.screen.height - height) / 2;
+
+      // ポップアップウィンドウのオプションをより詳細に設定
+      const windowFeatures = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'menubar=no',      // メニューバーを非表示
+        'toolbar=no',      // ツールバーを非表示
+        'location=no',     // アドレスバーを非表示
+        'status=no',       // ステータスバーを非表示
+        'scrollbars=yes',  // スクロールバーを表示
+        'resizable=yes'    // リサイズ可能
+      ].join(',');
+
+      const newWindow = window.open('', 'DepartmentWindow', windowFeatures);
+      if (newWindow) {
+        newWindow.location = targetUrl;
+        newWindow.focus(); // ウィンドウにフォーカスを移動
+      } else {
+        // ポップアップがブロックされた場合の処理
+        alert('ポップアップがブロックされました。このサイトのポップアップを許可してください。');
+      }
+      return false;
+    })
+  );
+}
+
+
+
+    // Add keyboard shortcuts
+$(window).keydown(function(e) {
+  if (e.shiftKey) {
+    switch (e.which) {
+    case 67: // Shift + Key[C]
+      $("#clear_btn").click();
+      break;
+
+    case 70: // Shift + Key[F]
+      $("#filter_full_payload").click();
+      break;
+
+    case 89: // Shift + Key[Y]
+      $("#filter_yes_count").click();
+      break;
+
+    case 78: // Shift + Key[N]
+      $("#filter_no_count").click();
+      break;
+
+    case 85: // Shift + Key[U]
+      $("#filter_unselected").click();
+      break;
+
+    case 68: // Shift + Key[D]
+      $("#select_no_btn").click(); // Replace with the appropriate element ID or action
+      break;
+    /*
+      case 90: // Shift + Key[Z] Duplicate
+        $('td:nth-child(1) > div > p-radiobutton > div > div.ui-radiobutton-box.ui-widget.ui-state-default > span').trigger("click");
+        break;
+
+      case 65: // Shift + Key[A] Different
+        $('td:nth-child(2) > div > p-radiobutton > div > div.ui-radiobutton-box.ui-widget.ui-state-default > span').trigger("click");
+        break;
+
+      case 85: // Key[u] Undecided
+        $('td:nth-child(3) > div > p-radiobutton > div > div.ui-radiobutton-box.ui-widget.ui-state-default > span').trigger("click");
+        break;
+
+      case 82: // Shift + Key[R] Reset
+        $('button[label="Reset"]').trigger("click");
+        break;
+
+      case 83: // Shift + Key[S] Submit
+        $('button[label="Submit"]').trigger("click");
+        break;
+        */
+    }
+  } else {
+    // Handle non-Shift key presses here if needed
+    switch (e.which) {
+      // Your original non-Shift key handlers can go here
+    }
+  }
+  // Prevent default behavior for these key combinations
+  if (e.shiftKey && [67, 70, 89, 78, 85].includes(e.which)) {
+    e.preventDefault();
+  }
+});
+
+function Change_background_verif() {
+  if ($('table.user-answers tr').length > 1){
+    let auditor_decision_id;
+    $('.answer-row-user-text').each(function(i){
+      $(this).wrap(`<button value=${i} class='change_bg_bttn'></button>`);
+    })
+  }
+
+  $(".label-map-submitted-labels-chosen-label").each(function() {
+    if ($(this).text() === "Yes, this belongs to the VPI") {
+      $(this).parents(".label-map-grid-item").css("background-color", "rgb(202, 236, 255)");
+    } else {
+      $(this).parents(".label-map-grid-item").css("background-color", "rgb(255, 227, 227)");
+
+    }
+  });
+}
+
+function Change_background_verif2() {
+  $('.change_bg_bttn').on('click', function(){
+    let index_val = $(this).attr('value');
+    $(".label-map-submitted-labels").each(function() {
+    if ($('.label-map-submitted-labels-chosen-label', $(this)).eq(index_val).text() === "Yes, this belongs to the VPI") {
+      $(this).parents(".label-map-grid-item").css("background-color", "rgb(202, 236, 255)");
+    } else {
+      $(this).parents(".label-map-grid-item").css("background-color", "rgb(255, 227, 227)");
+    }
+  });
+  })
+}
+
+function audit_page(document) {
+    $(document).ready(function() {
+        var this_url = window.location.href;
+        if (this_url.indexOf("/channel/") > -1) {
+            display_asin_info();
+            get_image_url(this_url);
+            create_settings();
+            initial_settings();
+            val_buttons(this_url);
+            keyword_filter_init(this_url);
+            ImageComparison();
+            // addDepartmentLink()の直接呼び出しを削除
+            // 代わりにinitial_settings()内で条件付き実行
+        }
+    });
+}
+
+
+function verification_page(document) {
+  $(document).ready(function() {
+    var this_url = window.location.href;
+    if (this_url.indexOf("/channels/") > -1) {
+      display_asin_info(this_url);
+      get_image_url(this_url);
+      create_settings();
+      initial_settings();
+      //filter_by_yes_no();
+      val_buttons(this_url);
+      keyword_filter_init(this_url);
+      Change_background_verif();
+      Change_background_verif2();
+      ImageComparison();
+    }
+  });
+}
+
+// Ensure the function runs after the DOM is fully loaded
+// window.$(document).ready(function() {
+//      console.log("Document ready, initializing functions...");
+//      filter_by_yes_no(); // Add the new filter
+//  });
+//})();
+/////////////////////////////////////////////////////////////////////////
+//
+// ==UserScript==
+// @name         GCO + ParentID Matching Unified Script (Fixed)
+// @namespace    ViolentmonkeyScripts
+// @version      5.1
+// @description  Combines GCO Script with safe parent_id highlight & filter toggles + filter reset on submit
+// @match        https://ir-editor.amazon.com/*
+// @grant        none
+// ==/UserScript==
+
+(function () {
+  'use strict';
+
+  const MATCH_COLOR = '#fff8b3';
+  const VPI_CARD_XPATH = "/html/body/div/div/awsui-app-layout/div/main/div/div[2]/div/span/div/div[2]/div/div[1]/div[2]/div";
+  let currentParentFilter = 'all';
+
+  const parentStyle = document.createElement('style');
+  parentStyle.textContent = `.hidden-by-parentid { display: none !important; }`;
+  document.head.appendChild(parentStyle);
+
+  function getVpiParentIdAndTargetP() {
+    const vpiCard = document.evaluate(VPI_CARD_XPATH, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+    if (!vpiCard) return { vpiVal: null, targetP: null };
+
+    let vpiVal = null, targetP = null;
+    vpiCard.querySelectorAll('p').forEach(p => {
+      const txt = p.textContent.trim();
+      const match = txt.match(/(?:example_asin_parent_id|parent_id):\s*(\S+)/i);
+      if (match) {
+        vpiVal = match[1];
+        targetP = p;
+      }
+    });
+    return { vpiVal, targetP };
+  }
+
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+
+  function getVEACards() {
+    return Array.from(document.querySelectorAll('.label-map-grid-item')).map(card => {
+      let val = null, targetP = null;
+      card.querySelectorAll('p').forEach(p => {
+        const txt = p.textContent.trim();
+        const match = txt.match(/(?:example_asin_parent_id|parent_id):\s*(\S+)/i);
+        if (match) {
+          val = match[1];
+          targetP = p;
+        }
+      });
+      return { card, val, targetP };
+    });
+  }
+
+  function applyHighlightAndFilter(vpiVal) {
+    const veaCards = getVEACards();
+    veaCards.forEach(({ card, val, targetP }) => {
+      if (targetP) targetP.style.backgroundColor = '';
+      card.classList.remove('hidden-by-parentid');
+      if (val === vpiVal && targetP) targetP.style.backgroundColor = MATCH_COLOR;
+
+      if (currentParentFilter === 'match' && val !== vpiVal) {
+        card.classList.add('hidden-by-parentid');
+      } else if (currentParentFilter === 'nomatch' && val === vpiVal) {
+        card.classList.add('hidden-by-parentid');
+      }
+    });
+  }
+
+  function injectButtonsBelow(pElem, vpiVal) {
+    if (!pElem || pElem.dataset.scriptInjected === "true") return;
+    pElem.dataset.scriptInjected = "true";
+
+    const btnWrapper = document.createElement('div');
+    btnWrapper.style.display = 'flex';
+    btnWrapper.style.gap = '8px';
+    btnWrapper.style.marginTop = '5px';
+
+    const buttons = [
+      { icon: '✔️', title: 'Show Only Matches', value: 'match' },
+      { icon: '❌', title: 'Show Only Non-Matches', value: 'nomatch' },
+      { icon: '🔁', title: 'Show All', value: 'all' },
+    ];
+
+    buttons.forEach(({ icon, title, value }) => {
+      const btn = document.createElement('button');
+      btn.textContent = icon;
+      btn.title = title;
+      btn.style.fontSize = '16px';
+      btn.style.cursor = 'pointer';
+      btn.style.border = '1px solid #ccc';
+      btn.style.borderRadius = '4px';
+      btn.style.padding = '3px 6px';
+      btn.style.background = '#fff';
+
+      btn.addEventListener('click', () => {
+        currentParentFilter = value;
+        applyHighlightAndFilter(vpiVal);
+        if (typeof window.applyFilters === 'function') {
+          window.applyFilters();
+        }
+      });
+
+      btnWrapper.appendChild(btn);
+    });
+
+    pElem.insertAdjacentElement('afterend', btnWrapper);
+  }
+
+  function initParentFilter() {
+    const { vpiVal, targetP } = getVpiParentIdAndTargetP();
+    if (!vpiVal || !targetP) return;
+    injectButtonsBelow(targetP, vpiVal);
+    applyHighlightAndFilter(vpiVal);
+  }
+
+  // ✅ Fix 1: Debounced MutationObserver
+  let filterTimer = null;
+  const observer = new MutationObserver(() => {
+    clearTimeout(filterTimer);
+    filterTimer = setTimeout(() => {
+      initParentFilter();
+    }, 300);
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+
+  window.addEventListener('load', () => {
+    setTimeout(initParentFilter, 1000);
+  });
+
+  // ✅ Fix 2: Reset Filter on Submit Button Click
+  document.addEventListener('click', function (e) {
+    if (
+      e.target.tagName === 'BUTTON' &&
+      e.target.textContent.trim().toLowerCase() === 'submit'
+    ) {
+      currentParentFilter = 'all';
+    }
+  });
+  ////////////////////////////////////////////////////////////////////////
+  ///////////////////////// 2. GCO SCRIPT ENTRY //////////////////////////
+  ////////////////////////////////////////////////////////////////////////
+
+  // You don’t need to paste the GCO code here again.
+  // Instead, **keep using your existing full GCO script**
+  // and just append the above parent_id section at the bottom
+  // of your current unified script or load it with Violentmonkey.
+
+})();
+// ==UserScript==
+// @name         Additional Keyword and Fit Type Filter
+// @namespace    GCO_C2P_EXTRA_FILTERS
+// @version      1.3
+// @description  Adds dynamic filter buttons for additional keyword/features and fit types below department filters with strict boundary check and highlight. Preserves original HTML to avoid interference.
+// @match        *://ir-editor.amazon.com/questionHub/*
+// @grant        none
+// ==/UserScript==
+(function () {
+    'use strict';
+
+    const TRANSLATIONS = {
+        "Rain Proof": ["regendicht", "imperméable à la pluie"],
+        "Slip Resistant": ["rutschfest", "antidérapant"],
+        "Wide Calf": ["breiter Schaft", "large mollet"],
+        "Water Resistant": ["wasserabweisend", "résistant à l’eau"],
+        "Fire Resistant": ["feuerfest", "résistant au feu"],
+        "Flame Resistant": ["flammenresistent", "résistant aux flammes"],
+        "Soft-Foot Bed": ["weiches Fußbett", "semelle intérieure douce"],
+        "Sun Protection": ["Sonnenschutz", "protection solaire"],
+        "Steel Toe": ["Stahlkappe", "embout en acier"],
+        "Composite Toe": ["Verbundstoffkappe", "embout composite"],
+        "Weather Proof": ["wetterfest", "résistant aux intempéries"],
+        "Waterproof": ["wasserdicht", "imperméable"],
+        "Gore-Tex": ["Gore‑Tex", "Gore‑Tex"],
+        "Original": ["original", "original"],
+        "Professional": ["professionell", "professionnel"],
+        "Limited Edition": ["limitierte Auflage", "édition limitée"],
+        "Special Edition": ["Sonderedition", "édition spéciale"],
+        "Discontinued": ["eingestellt", "arrêté"],
+        "Premium": ["Premium", "premium"],
+        "Retired": ["ausgemustert", "retiré"],
+        "Obsolete": ["veraltet", "obsolète"],
+        "Seasonal": ["saisonal", "saisonnier"],
+        "Legacy": ["Erbe", "héritage"],
+        "Closeout": ["Räumungsverkauf", "déstockage"],
+        "Version": ["Version", "version"],
+        "Version 1": ["Version 1", "version 1"],
+        "Version 2": ["Version 2", "version 2"],
+        "Authentic": ["authentisch", "authentique"],
+        "Recycled": ["recycelt", "recyclé"],
+        "Stretch": ["dehnbar", "extensible"],
+        "Vegan": ["vegan", "végan"],
+        "Lightweight": ["leicht", "léger"],
+        "Heavyweight": ["schwer", "lourd"],
+        "Padded": ["gepolstert", "rembourré"],
+        "Tummy Control": ["Taillenformung", "gainant ventre"],
+        "Seamless": ["nahtlos", "sans couture"],
+        "Wirefree": ["ohne Bügel", "sans armatures"],
+        "moisture wicking": ["feuchtigkeitsableitend", "évacuation de l’humidité"],
+        "moisture-wicking": ["feuchtigkeitsableitend", "évacuation de l’humidité"],
+        "Arch support": ["Fußgewölbestütze", "soutien de la voûte plantaire"]
+    };
+
+    const FIT_TYPES = [
+        'Skinny', 'Relaxed', 'Slim', 'Taper', 'Classic', 'Loose',
+        'Straight', 'Curvy', 'Bootcut', 'Original', 'Standard', 'Regular'
+    ];
+
+    const FIT_TYPE_TRANSLATIONS = {
+        "Skinny": ["eng anliegend", "ajusté"],
+        "Relaxed": ["locker", "décontracté"],
+        "Slim": ["schmal geschnitten", "mince"],
+        "Taper": ["zulaufend", "fuselé"],
+        "Classic": ["klassisch", "classique"],
+        "Loose": ["weit", "large"],
+        "Straight": ["gerade geschnitten", "droit"],
+        "Curvy": ["kurvig", "galbé"],
+        "Bootcut": ["bootcut", "coupe évasée"],
+        "Original": ["original", "original"],
+        "Standard": ["standardmäßig", "standard"],
+        "Regular": ["normal", "régulier"]
+    };
+
+    const ADDITIONAL_KEYWORDS = Object.keys(TRANSLATIONS).concat([
+        'RP', 'SR', 'WC', 'WR', 'FR', 'SFB', 'SP', 'ST', 'CT', 'WP', 'GTX',
+        'Pro', 'LE', 'SE', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7', 'V8', 'V9'
+    ]);
+
+    function normalizeText(text) {
+        return text.toLowerCase();
+    }
+
+    function findMatches(text, list) {
+        const lowered = normalizeText(text);
+        const matches = [];
+        for (let keyword of list) {
+            const safeKeyword = keyword.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const pattern = new RegExp(`\\b${safeKeyword}\\b`, 'i');
+            if (pattern.test(lowered)) matches.push(keyword);
+        }
+        return matches;
+    }
+
+    function highlightMatches($elem, keywords, fitTypes) {
+        $elem.find("p, h4, span").each(function () {
+            let html = $(this).html();
+            let updated = false;
+
+            keywords.forEach(kw => {
+                const esc = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const pat = new RegExp(`\\b(${esc})\\b`, 'gi');
+                html = html.replace(pat, (m, g1) => {
+                    updated = true;
+                    const tip = TRANSLATIONS[g1]?.join(' / ') || '';
+                    return `<span style="background-color: #fff3cd; border-radius: 3px; padding: 1px 2px;" title="${tip}">${g1}</span>`;
+                });
+            });
+
+            fitTypes.forEach(ft => {
+                const esc = ft.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const pat = new RegExp(`\\b(${esc})\\b`, 'gi');
+                html = html.replace(pat, (m, g1) => {
+                    updated = true;
+                    const tip = FIT_TYPE_TRANSLATIONS[g1]?.join(' / ') || '';
+                    return `<span style="background-color: #d4edda; border-radius: 3px; padding: 1px 2px;" title="${tip}">${g1}</span>`;
+                });
+            });
+
+            if (updated) $(this).html(html);
+        });
+    }
+
+    function renderFilters() {
+        $('#additional_filters_section').remove();
+
+        const keywordSet = new Set();
+        const fitTypeSet = new Set();
+
+        $(".label-map-grid-item").each(function () {
+            const txt = $(this).text();
+            findMatches(txt, ADDITIONAL_KEYWORDS).forEach(k => keywordSet.add(k));
+            findMatches(txt, FIT_TYPES).forEach(f => fitTypeSet.add(f));
+            highlightMatches($(this), Array.from(keywordSet), Array.from(fitTypeSet));
+        });
+
+        const section = $(`
+            <div id="additional_filters_section" style="margin-top:15px;">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:5px;">
+                    <span style="font-weight:bold;">Additional Keywords / Features:</span>
+                    <button id="rerun_translation_check" title="Re-scan page for translated features and fit types"
+                        style="cursor:pointer;border:none;background:none;font-size:18px;"
+                    >
+                        🌐
+                    </button>
+                </div>
+                <div id="keyword_filters" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px;"></div>
+                <div style="font-weight: bold; margin-bottom: 5px;">Fit Types:</div>
+                <div id="fit_type_filters" style="display:flex;flex-wrap:wrap;gap:5px;"></div>
+            </div>
+        `);
+        $("#department_filters").parent().append(section);
+
+        keywordSet.forEach(k => {
+            $("#keyword_filters").append(`<button class="filter_keyword" data-keyword="${k}">${k}</button>`);
+        });
+        fitTypeSet.forEach(ft => {
+            $("#fit_type_filters").append(`<button class="filter_fit" data-fit="${ft}">${ft}</button>`);
+        });
+
+        $(".filter_keyword").on("click", function () {
+            const sel = $(this).data("keyword").toLowerCase();
+            $(".label-map-grid-item").each(function () {
+                $(this).toggle($(this).text().toLowerCase().includes(sel));
+            });
+        });
+
+        $(".filter_fit").on("click", function () {
+            const sel = $(this).data("fit").toLowerCase();
+            $(".label-map-grid-item").each(function () {
+                $(this).toggle($(this).text().toLowerCase().includes(sel));
+            });
+        });
+
+        // 🌐 Recheck Button
+        $("#rerun_translation_check").on("click", function () {
+            const btn = $(this);
+            btn.css({ transform: 'rotate(0deg)', transition: 'transform 0.4s ease' });
+            setTimeout(() => {
+                btn.css('transform', 'rotate(360deg)');
+                setTimeout(() => renderFilters(), 400);
+            }, 0);
+        });
+    }
+
+
+    function runWithDelay() {
+        const check = setInterval(() => {
+            if (document.querySelector("#department_filters")) {
+                clearInterval(check);
+                renderFilters();
+            }
+        }, 500);
+    }
+
+    runWithDelay();
+})();
