@@ -1,740 +1,271 @@
 
 // ==UserScript==
-// @name        GCO_C2P_MATCHING_VAL_SCRIPT_beta
-// @namespace   GCO_C2P_MATCHING_VAL_SCRIPT_beta
-// @include     https://ir-editor.amazon.com/questionHub/#/channel/*
-// @include     *://ir-editor.amazon.com/questionHub*
-// @include     https://ir-editor.amazon.com/questionHub/*
-// @match       *://ir-editor.amazon.com/questionHub*
-// @match       https://ir-editor.amazon.com/questionHub/*
-// @require     https://code.jquery.com/jquery-3.6.0.min.js
-// @require     https://gist.github.com/BrockA/2625891/raw/waitForKeyElements.js
-// @grant       none
-// @version     4.04b
-// @grant       GM_addStyle
-// @author      momonomu@ masayak@ lalocaba@ ashilkum@ rajvakas@
-// @description Improved GCO C2P Matching VAL Script
-// @downloadURL https://drive.corp.amazon.com/view/GCO%20Tools/GCO_cluster_creation_VAL_script.user.js
-// @updateURL https://drive.corp.amazon.com/view/GCO%20Tools/GCO_cluster_creation_VAL_script.user.js
+// @name         Advanced Dynamic Triage for IR Editor v3
+// @namespace    amazon_ir_editor_advanced_triage
+// @version      3.0
+// @description  Adds Undo, visual separator, decision history, keyboard shortcuts, stats panel, and color-coding to the IR Editor triage workflow.
+// @match        https://ir-editor.amazon.com/*
+// @grant        GM_setValue
+// @grant        GM_getValue
 // ==/UserScript==
 
-(function() {
+(function () {
     'use strict';
 
-    // Global sets for filter data. These will be populated by renderFilters.
-    // They are initialized as empty sets.
-    const departmentSet = new Set();
-    const keywordSet = new Set();
-    const fitTypeSet = new Set();
+    const decisionColorMapping = {
+        'Match': 'triage-match',
+        'Yes': 'triage-match',
+        'No Match': 'triage-no-match',
+        'No': 'triage-no-match',
+        'Flag': 'triage-flag',
+        'Uncertain': 'triage-flag'
+    };
 
-    // Apply styles immediately at script load
-    applyStyles();
+    const style = document.createElement('style');
+    style.textContent = `
+        .triage-processed {
+            transition: opacity 0.3s ease-in-out;
+        }
+        .triage-match { border-left: 5px solid #28a745; }
+        .triage-no-match { border-left: 5px solid #dc3545; }
+        .triage-flag { border-left: 5px solid #ffc107; }
 
-    // Call functions based on the specific page content appearing
-    // Placeholder functions audit_page and verification_page are called by waitForKeyElements.
-    waitForKeyElements("awsui-button.label-map-question-submit", audit_page);
-    waitForKeyElements("div.prompt-item", verification_page);
+        .triage-vanishing {
+            transition: all 0.4s ease-in-out;
+            opacity: 0;
+            height: 0 !important;
+            padding-top: 0 !important;
+            padding-bottom: 0 !important;
+            margin-top: 0 !important;
+            margin-bottom: 0 !important;
+            overflow: hidden;
+            border-width: 0 !important;
+        }
 
-    // Initialize image and chime functionality once the required elements are present.
-    // Using event delegation for dynamically added elements.
-    waitForKeyElements("div.task-queue-content img, img.label-map-question-template-item-image", function() {
-        get_image_url(window.location.href);
-    });
+        #triage-controls {
+            position: fixed; bottom: 20px; right: 20px; z-index: 9999;
+            display: flex; flex-direction: column; gap: 10px;
+            background: #fff; padding: 12px;
+            border-radius: 10px; box-shadow: 0 4px 14px rgba(0,0,0,0.2);
+            font-family: Arial, sans-serif; font-size: 13px;
+        }
+        #triage-controls button {
+            padding: 6px 12px; font-size: 13px;
+            border: 1px solid #ccc; border-radius: 5px; cursor: pointer;
+        }
+        #triage-controls button:disabled {
+            opacity: 0.5; cursor: not-allowed;
+        }
+        #undo-triage-btn { background: #6c757d; color: white; }
+        #toggle-triage-btn.active { background: #007bff; color: white; }
+        #toggle-triage-btn.paused { background: #ffc107; }
 
-    // Create settings UI
-    create_settings();
+        #triage-separator {
+            width: 100%; text-align: center; font-weight: bold;
+            color: #888; padding: 15px 0; margin: 10px 0;
+            border-top: 2px dashed #ccc; border-bottom: 2px dashed #ccc;
+            order: 9998;
+        }
 
-    // Initialize keyword filter UI and functionality
-    keyword_filter_init(window.location.href);
+        #triage-history {
+            margin-top: 10px;
+        }
+        #triage-history div {
+            font-size: 12px; color: #333;
+        }
 
-    // Apply initial settings from localStorage and set up event listeners
-    initial_settings();
+        #triage-stats {
+            display: flex; gap: 8px; font-size: 12px; color: #555;
+            margin-top: 8px;
+        }
+        #triage-stats span { font-weight: bold; }
+    `;
+    document.head.appendChild(style);
 
-    // Run the delay check for department filters and render them once elements are ready
-    runWithDelay();
+    const controlsDiv = document.createElement('div');
+    controlsDiv.id = 'triage-controls';
+    controlsDiv.innerHTML = `
+        <button id="undo-triage-btn" disabled>Undo (Z)</button>
+        <button id="toggle-triage-btn">Toggle Triage</button>
+        <div id="triage-stats">
+            <div>✅ Match: <span id="count-match">0</span></div>
+            <div>❌ No Match: <span id="count-nomatch">0</span></div>
+            <div>⚠️ Flag: <span id="count-flag">0</span></div>
+        </div>
+        <div id="triage-history"><strong>Recent:</strong><br></div>
+    `;
+    document.body.appendChild(controlsDiv);
 
+    const separator = document.createElement('div');
+    separator.id = 'triage-separator';
+    separator.textContent = '--- Processed ---';
 
-    // --- Function Definitions ---
+    let gridContainer = null;
+    let lastMove = { item: null, nextSibling: null, appliedClasses: [], originalHeight: '' };
+    let isTriageActive = GM_getValue('isTriageActive', true);
+    const historyLimit = 5;
+    let history = [];
 
-    function applyStyles() {
-        GM_addStyle(`
-            #settings_box {
-                display: none;
-                position: fixed;
-                top: 15%;
-                left: 40%;
-                background: white;
-                border: 1px solid black;
-                padding: 10px;
-                z-index: 777;
-                width: 300px;
-                box-shadow: 0 0 0 100vmax rgba(0,0,0,.5);
-            }
-            #settings_container { padding: 10px; }
-            #settings_header h2 { padding: 5px; }
-            #open_settings {
-                text-align: center;
-                width: auto;
-                margin: 3px;
-                padding: 3.5px;
-                background: white;
-                color: #545b64;
-                border: 1px solid #545b64;
-            }
-            #close_pop {
-                width: 60%;
-                text-align: center;
-                margin: auto;
-                padding: 8px 8px;
-                background: white;
-                color: #5c5c5c;
-                border: 1px solid #545b64;
-            }
-            #open_settings:hover, #close_pop:hover {
-                cursor: pointer;
-                background: whitesmoke;
-            }
-            .task-queue-header { position: fixed; z-index: 999; }
-            .task-queue-content { padding-top: 50px; }
-            #button_grps { background-color: white; padding: 10px; border: 1px solid black; }
-            #button_grps button {
-                border: 1px solid transparent;
-                padding: 5px 10px;
-                border: none;
-                cursor: pointer;
-            }
-            /* Red button */
-            #select_no_btn:hover {
-                border: 1px solid rgba(255, 50, 50, 0.8);
-                cursor: pointer;
-                box-shadow: 0 0 3px rgba(255, 100, 100, 0.3);
-            }
-            /* Orange button */
-            #select_no_img:hover {
-                border: 1px solid rgba(255, 140, 0, 0.8);
-                cursor: pointer;
-                box-shadow: 0 0 3px rgba(255, 159, 0, 0.3);
-            }
-            /* Gray button */
-            #clear_btn:hover {
-                border: 1px solid rgba(160, 160, 160, 0.8);
-                cursor: pointer;
-                box-shadow: 0 0 3px rgba(160, 160, 160, 0.3);
-            }
-            #select_no_btn { background-color: rgb(255, 100, 100); color: black; }
-            #select_no_img { margin-left: 10px; background-color: #ff9f00; color: black; }
-            #clear_btn { margin-left: 10px; background-color: #e0e0e0; color: black; }
-            #filter_div { margin-bottom: 10px; }
-            #filter_div input { height: 30px; width: 100%; }
-            #filter_div button {
-                font-size: 16px;
-                margin-left: 10px;
-                padding: 5px 10px;
-                background-color: #e0e0e0;
-                color: black;
-                border: none;
-                cursor: pointer;
-            }
-            .table-wrapper { margin-bottom: 20px; }
-            #shortcut_keys table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-            #shortcut_keys th, #shortcut_keys td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-            #shortcut_keys th { background-color: #f2f2f2; font-weight: bold; }
-            #shortcut_keys tr:nth-child(even) { background-color: #f9f9f9; }
-            /* Base styles for image ID and Chime buttons */
-            .val_img_id_btn, .chime-button {
-                background-color: rgba(0, 0, 0, 0.03);
-                color: #555;
-                border: none;
-                border-radius: 3px;
-                padding: 2px 4px;
-                font: inherit;
-                font-size: 0.9em;
-                cursor: pointer;
-                text-decoration: none;
-                display: inline-block;
-                margin: 0;
-                transition: all 0.3s ease;
-                margin-left: 5px; /* Added margin for chime button specifically */
-            }
-            .val_img_id_btn:hover, .chime-button:hover { background-color: rgba(0, 0, 0, 0.06); color: #333; }
-            .val_img_id_btn:focus, .chime-button:focus { outline: none; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1); }
-            /* Accessibility for focus indicator */
-            .val_img_id_btn:focus-visible, .chime-button:focus-visible { box-shadow: 0 0 0 2px rgba(0, 102, 204, 0.3); }
+    const undoBtn = document.getElementById('undo-triage-btn');
+    const toggleBtn = document.getElementById('toggle-triage-btn');
 
-            /* Filter button styles */
-            .filter_department, .filter_keyword, .filter_fit {
-                margin: 5px;
-                padding: 5px 10px;
-                background-color: #e0e0e0;
-                color: black;
-                border: none;
-                cursor: pointer;
-                border-radius: 4px;
-                transition: background-color 0.2s ease;
-            }
-            .filter_department:hover, .filter_keyword:hover, .filter_fit:hover { background-color: #d0d0d0; }
-            .filter_department.selected { background-color: #FFC107; color: black; }
-            #department_filters, #keyword_filters, #fit_type_filters { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
-        `);
+    const statEls = {
+        'Match': document.getElementById('count-match'),
+        'No Match': document.getElementById('count-nomatch'),
+        'Flag': document.getElementById('count-flag')
+    };
+
+    function updateToggleUI() {
+        toggleBtn.textContent = isTriageActive ? 'Pause' : 'Resume';
+        toggleBtn.classList.toggle('active', isTriageActive);
+        toggleBtn.classList.toggle('paused', !isTriageActive);
     }
 
-    function get_image_url(this_url) {
-        const url_ptn = /._AC_UX220_/g; // Regex for removing common image size parameters
-
-        // Process image elements
-        const selector = this_url.includes("/channel/") ?
-            "div.task-queue-content img" :
-            "img.label-map-question-template-item-image";
-
-        // Detach previous event handlers to prevent duplication if function runs multiple times
-        $(document).off('click', '.val_img_id_btn');
-        $(document).off('click', '.chime-button');
-
-        $(selector).each(function() {
-            const img_url = $(this).attr('src');
-            if (!img_url) return;
-
-            const splitted_img_url = img_url.split('/');
-            // Extract the image ID, e.g., B0BZ5M6F1F
-            const replaced_url = splitted_img_url[splitted_img_url.length - 1].split('.')[0];
-
-            // Check if this is a child ASIN image (not the main VPI image in prompt-item)
-            const isChildAsin = !$(this).closest('.prompt-item').length;
-            const enable_chime_btn = localStorage.getItem("enable_chime_btn") === "true";
-
-            // VPI image URL for comparison
-            const vpi_img = document.querySelector('.prompt-item > .label-map-item > img');
-            const vpi_img_url = vpi_img ? vpi_img.src : '';
-            const matchExists = isChildAsin && vpi_img_url.includes(img_url);
-
-            let matchCount = 0;
-            if ($(this).closest('.prompt-item').length) { // This seems to count matches for the VPI image itself
-                matchCount = $('img').not('.prompt-item img').filter(function() {
-                    return vpi_img_url.includes($(this).attr('src'));
-                }).length;
+    function updateSeparator() {
+        if (!gridContainer) return;
+        const firstProcessed = gridContainer.querySelector('.triage-processed');
+        if (firstProcessed) {
+            if (!separator.parentElement || separator.nextSibling !== firstProcessed) {
+                gridContainer.insertBefore(separator, firstProcessed);
             }
-
-            const new_html = `
-                <div style="display: flex; align-items: center; margin-top: 5px;">
-                    <button class="val_img_id_btn" data_url="${img_url.replace(url_ptn, '')}">${replaced_url}</button>
-                    ${matchCount > 0 ? `<span style="margin-left: 5px; background-color: rgba(0, 0, 0, 0.03); color: #555; font-size: 0.8em;">(${matchCount})</span>` : ''}
-                    ${isChildAsin && enable_chime_btn ? '<button class="chime-button">Chime</button>' : ''}
-                </div>
-            `;
-            $(this).after(new_html);
-
-            // Apply special highlight if image matches VPI
-            if (matchExists) {
-                $(this).siblings('div').find('.val_img_id_btn').add('.prompt-item button.val_img_id_btn').each(function() {
-                    if (vpi_img_url.includes($(this).text())) { // Text is the extracted image ID
-                        $(this).css({'background-color': '#fffdb3', 'outline-color': '#dfd920'});
-                    }
-                });
-            }
-        });
-
-        function copyToClipboard(text) {
-            navigator.clipboard.writeText(text)
-                .then(() => console.log('Copied to clipboard:', text))
-                .catch(err => console.error('Failed to copy: ', err));
+        } else if (separator.parentElement) {
+            separator.parentElement.removeChild(separator);
         }
-
-        // Event delegation for dynamically added image ID buttons
-        $(document).on('click', '.val_img_id_btn', function(e) {
-            const data_url = $(this).attr('data_url');
-            if (!data_url) return;
-
-            const copy_image_id = localStorage.getItem("copy_image_id") === "true";
-
-            if (e.shiftKey) {
-                window.open(data_url, '_blank');
-            } else if (e.ctrlKey) {
-                e.preventDefault();
-                const tabName = 'tab_' + btoa(data_url).replace(/[^a-zA-Z0-9]/g, '');
-                window.open(data_url, tabName);
-            } else if (copy_image_id) {
-                copyToClipboard($(this).text());
-            } else {
-                window.open(data_url, '_blank');
-            }
-        });
-
-        function createChimeCopy($gridItem, payloadURL) {
-            const getTextContent = (selector, defaultValue = 'N/A') =>
-                $gridItem.find(selector).text().trim().split(':')[1]?.trim() || defaultValue;
-
-            return `Question: (Please type your questions here)
-
-Payload: ${payloadURL}
-Brand: ${getTextContent('p:contains("brand:")')}
-
-VPI model_name : ${$('.prompt-item p:contains("model_name:")').text().split(':')[1]?.trim() || 'N/A'}
-VPI IMG:${$('.prompt-item .label-map-item .val_img_id_btn').attr('data_url') || 'N/A'}
-
-VEA ASIN: ${$gridItem.find('div.label-map-item > span').attr('title') || 'N/A'}
-VEA IMG: ${$gridItem.find('.val_img_id_btn').attr('data_url') || 'N/A'}
-
-VEA model_name: ${getTextContent('p:contains("model_name:")')}
-VEA ASIN_title: ${$gridItem.find('h4').text().trim()}
-`;
-        }
-
-        // Event delegation for dynamically added Chime buttons
-        $(document).on('click', '.chime-button', function() {
-            const $gridItem = $(this).closest('.label-map-grid-item');
-            const channelId = $("div.task-queue-title > h2").text();
-            const questionId = $('h5').text().trim().replace('Question: ', '').slice(0, 32);
-            const payloadURL = this_url.includes("/channel/") ?
-                `https://ir-editor.amazon.com/questionHub/#/channels/${channelId}/questions/${questionId}` :
-                this_url;
-
-            const chimeCopy = createChimeCopy($gridItem, payloadURL);
-            copyToClipboard(chimeCopy);
-            alert('Copied to clipboard:\n' + chimeCopy);
-        });
     }
 
-    function create_settings(){
-        const this_url = window.location.href;
+    function addToHistory(buttonText) {
+        const time = new Date().toLocaleTimeString();
+        const entry = `${time} → ${buttonText}`;
+        history.unshift(entry);
+        if (history.length > historyLimit) history.pop();
 
-        if($("#settings_box").length == 0) {
-            const settings = `<span id='open_settings' style='font-size: 1.4rem;line-height:2rem; font-weight: 700;border-radius: 2px;border: 1px solid; text-decoration: none;'>GCO VAL SCRIPT Settings</span>
-            <div style='padding: 0px; margin: 0px 0px 0px 0px;'>
-                <div id='settings_box'>
-                    <h3 style='font-size: 1em; font-weight: normal;'>Settings</h3>
-                    <div id='settings_container'>
-                        <div style='line-height: 1.3; text-align: left; font-size: 0.9em;'>
-                            <div style='margin-left: 10px;'>
-                                <input type='checkbox' id='dpt_highlighter'>
-                                <label style='font-weight: normal;'>Department Highlighter for SL</label><br>
-
-                                <input type='checkbox' id='hide_skip_btn'>
-                                <label style='font-weight: normal;'>Hide Skip button</label><br>
-
-                                <input type='checkbox' id='disable_submit_btn'>
-                                <label style='font-weight: normal;'>Disable Submit button</label><br>
-
-                                <input type='checkbox' id='enable_dept_link'>
-                                <label style='font-weight: normal;'>Enable Department SOP Link</label><br>
-
-                                <input type='checkbox' id='enable_chime_btn'>
-                                <label style='font-weight: normal;'>Enable Chime Button</label><br>
-
-                                <input type='checkbox' id='copy_image_id'>
-                                <label style='font-weight: normal;'>Copy Image ID on Click (Default: Open in New Tab)</label><br>
-                            </div>
-                        </div>
-                        <span style='display: none; font-size: 0.9em;' id='notice_box'><i>Reload the page</i></span>
-                    </div>
-                    <div id='shortcut_keys'>
-                        <h4 style='font-size: 0.95em; font-weight: normal;'>Shortcut Keys:</h4>
-                        <table style='font-size: 0.85em;'>
-                            <tr>
-                                <th style='font-weight: normal;'>Shortcut</th>
-                                <th style='font-weight: normal;'>Action</th>
-                            </tr>
-                            <tr><td>Shift + D</td><td>No to Unselected</td></tr>
-                            <tr><td>Shift + C</td><td>Unselect all ASINs</td></tr>
-                            <tr><td>Shift + F</td><td>Full Payload</td></tr>
-                            <tr><td>Shift + Y</td><td>Selected as Yes</td></tr>
-                            <tr><td>Shift + N</td><td>Selected as No</td></tr>
-                            <tr><td>Shift + U</td><td>Unselected</td></tr>
-                        </table>
-                    </div>
-                    <div id="close_pop" style="margin-top: 20px; font-size: 0.9em;">Save and close</div>
-                </div>
-            </div>`;
-
-            if (this_url.indexOf("/channel/") > -1) {
-                $("div.task-queue-left > awsui-button").after(settings);
-            } else if (this_url.indexOf("/channels/") > -1) {
-                $("button.show-hide-user-answers-button").after(settings);
-            }
-        }
-
-        $("#open_settings").on('click', function() { $("#settings_box").show(); });
-        $("#close_pop").on('click', function() { $("#settings_box").hide(); });
-
-        $("#open_settings").hover(function() { $(this).css({"cursor":"pointer", "background":"whitesmoke"}); }, function() { $(this).css({"cursor":"normal", "background":"white"}); });
-        $("#close_pop").hover(function() { $(this).css({"cursor":"pointer", "background":"whitesmoke"}); }, function() { $(this).css({"cursor":"normal", "background":"white"}); });
+        const container = document.getElementById('triage-history');
+        container.innerHTML = '<strong>Recent:</strong><br>' + history.map(e => `<div>${e}</div>`).join('');
     }
 
-    function keyword_filter_init(this_url) {
-        const special_char_escape = /[.*+\-?^${}()[\]\\]/g;
-        window.currentSelectedDepartment = null;
-
-        // Create helper tools container if it doesn't exist
-        if($("#helper_tools").length === 0) {
-            let scriptTitleHtml = `<div id='script_title'><h2 style='font-size: 14px; margin-top:20px;padding:0,5em;color: #494949;border-bottom: solid 1px grey;'>GCO C2P MATCHING VAL SCRIPT v4.00</h2></div>`;
-            if (this_url.indexOf("/channel/") > -1) {
-                $("div.label-map-answer-buttons").after(`${scriptTitleHtml}<div id="helper_tools" style="margin:5px 0px; padding:20px; font-size:22px"></div>`);
-            } else if (this_url.indexOf("/channels/") > -1) {
-                scriptTitleHtml = `<div id='script_title'><h2 style='font-size: 14px; margin-top:100px;padding:0,5em;color: #494949;border-bottom: solid 1px grey;'>GCO C2P MATCHING VAL SCRIPT v4.00</h2></div>`;
-                $("div.prompt-item").after(`${scriptTitleHtml}<div id="helper_tools" style="margin:5px 0px; padding:20px; font-size:22px"></div>`);
-            }
+    const stats = { 'Match': 0, 'No Match': 0, 'Flag': 0 };
+    function updateStats(buttonText) {
+        if (buttonText in stats) {
+            stats[buttonText]++;
+            statEls[buttonText].textContent = stats[buttonText];
+        } else if (buttonText === 'Yes') {
+            stats['Match']++;
+            statEls['Match'].textContent = stats['Match'];
+        } else if (buttonText === 'No') {
+            stats['No Match']++;
+            statEls['No Match'].textContent = stats['No Match'];
+        } else if (buttonText === 'Uncertain') {
+            stats['Flag']++;
+            statEls['Flag'].textContent = stats['Flag'];
         }
+    }
 
-        // Create filter UI, including department, keyword, and fit type filter sections
-        if($("#filter_div").length === 0) { // Check for filter_div existence
-            const html_info = `
-                <div id="filter_div">
-                    <div style="display:flex; margin-bottom: 10px;">
-                        <form id="live-search" action="" class="styled" method="post" style="flex-grow: 1;">
-                            <input style="height:30px; width: 100%;" placeholder="Values to include" type="text" class="text-input" id="filter" value="">
-                        </form>
-                        <button id="ClearIncludeSearch">Clear</button>
-                    </div>
+    function handleGridClick(event, forcedDecision = null) {
+        if (!isTriageActive) return;
 
-                    <div style="display:flex; margin-bottom: 10px;">
-                        <form id="live-search-exclude" action="" class="styled" method="post" style="flex-grow: 1;">
-                            <input style="height:30px; width: 100%;" placeholder="Values to exclude" type="text" class="text-input" id="filter_exclude" value="">
-                        </form>
-                        <button id="ClearExcludeSearch">Clear</button>
-                    </div>
+        const button = forcedDecision ? event : event.target.closest('.label-map-label-button');
+        if (!button) return;
 
-                    <div>
-                        <span style='font-size:16px;' id="filter-count"></span>
-                        <div style="display: flex; justify-content: flex-end; align-items: center; margin-top: 10px;">
-                            <label style="display: inline-flex; align-items: center; margin-right: 10px; white-space: nowrap;">
-                                <input type="checkbox" id="searchOption" style="margin-right: 5px;">
-                                <span style="font-size: 12px;">Enable Live Search</span>
-                            </label>
-                            <button id="SearchButton">Search</button>
-                        </div>
-                    </div>
+        const itemToMove = forcedDecision
+            ? document.activeElement.closest('.label-map-grid-item')
+            : button.closest('.label-map-grid-item');
 
-                    <div id="department_filters_container" style="margin-top: 20px;">
-                        <h4>Departments:</h4>
-                        <div id="department_filters"></div>
-                    </div>
-                    <div id="keyword_filters_container" style="margin-top: 20px;">
-                        <h4>Keywords:</h4>
-                        <div id="keyword_filters"></div>
-                    </div>
-                    <div id="fit_type_filters_container" style="margin-top: 20px;">
-                        <h4>Fit Types:</h4>
-                        <div id="fit_type_filters"></div>
-                    </div>
-                    <button id="rerun_translation_check" style="margin-top:10px; padding: 5px 10px;">🌐 Recheck</button>
-                </div>`;
-            $("#helper_tools").append(html_info);
-        }
+        if (!itemToMove || itemToMove.classList.contains('triage-vanishing')) return;
 
-        // Main filter application function
-        window.applyFilters = function() {
-            const filter = $("#filter").val();
-            const filter_exclude = $("#filter_exclude").val();
-            let filter_counter = 0;
+        lastMove.item = itemToMove;
+        lastMove.nextSibling = itemToMove.nextSibling;
+        lastMove.originalHeight = itemToMove.style.height;
+        lastMove.appliedClasses = Array.from(itemToMove.classList);
+        undoBtn.disabled = false;
 
-            $("div.label-map-template > div.label-map-items div.label-map-grid-item").each(function() {
-                const $item = $(this);
-                const text = $item.text(); // Get all text content for general filtering
-                let showItem = true;
+        const itemHeight = itemToMove.getBoundingClientRect().height;
+        itemToMove.style.height = `${itemHeight}px`;
 
-                // Keyword (include/exclude) filter application
-                if (filter !== "" || filter_exclude !== "") {
-                    const filterRegex = new RegExp(filter.replace(special_char_escape, '\\$&'), "i");
-                    const excludeRegex = new RegExp(filter_exclude.replace(special_char_escape, '\\$&'), "i");
+        const buttonText = forcedDecision || button.textContent.trim();
+        const colorClass = decisionColorMapping[buttonText] || '';
 
-                    if (filter !== "" && filter_exclude === "") {
-                        showItem = text.search(filterRegex) !== -1;
-                    } else if (filter === "" && filter_exclude !== "") {
-                        showItem = text.search(excludeRegex) === -1;
-                    } else { // Both include and exclude
-                        showItem = text.search(filterRegex) !== -1 && text.search(excludeRegex) === -1;
-                    }
-                }
+        const afterVanish = () => {
+            itemToMove.removeEventListener('transitionend', afterVanish);
+            if (colorClass) itemToMove.classList.add(colorClass);
+            itemToMove.classList.add('triage-processed');
+            gridContainer.appendChild(itemToMove);
+            updateSeparator();
+            itemToMove.classList.remove('triage-vanishing');
+            itemToMove.style.height = lastMove.originalHeight;
 
-                // Department filter application (from department buttons)
-                if (showItem && window.currentSelectedDepartment) {
-                    // Assuming data-department attribute is set on the grid-item by renderFilters or similar logic
-                    // Or, find the department text within the item to match
-                    const itemDepartment = $item.find("p:contains('department:')").text().replace("department:", "").trim();
-                    showItem = itemDepartment === window.currentSelectedDepartment;
-                }
-
-                // Show/hide setting
-                $item.toggle(showItem);
-                if (showItem) filter_counter++;
-            });
-
-            // Update filter count
-            if (filter.length > 0 || window.currentSelectedDepartment || filter_exclude.length > 0) {
-                const plural = filter_counter === 1 ? "" : "s";
-                $("#filter-count").text(`Found in ${filter_counter} ASIN${plural}`);
-            } else {
-                $("#filter-count").text("");
-            }
+            addToHistory(buttonText);
+            updateStats(buttonText);
         };
 
-        // Clear button event handlers
-        $("#ClearIncludeSearch").on('click', function() {
-            $("#filter").val("");
-            window.applyFilters();
-        });
-        $("#ClearExcludeSearch").on('click', function() {
-            $("#filter_exclude").val("");
-            window.applyFilters();
-        });
-        $("#SearchButton").on('click', function() {
-            window.applyFilters();
-        });
+        setTimeout(() => {
+            itemToMove.addEventListener('transitionend', afterVanish, { once: true });
+            itemToMove.classList.add('triage-vanishing');
+        }, 10);
+    }
 
-        // Live Search feature control
-        function enableLiveSearch() {
-            $("#filter, #filter_exclude").on('keyup', window.applyFilters);
-        }
+    function undoLastMove() {
+        if (!lastMove.item) return;
 
-        function disableLiveSearch() {
-            $("#filter, #filter_exclude").off('keyup', window.applyFilters);
-        }
+        const { item, nextSibling, appliedClasses, originalHeight } = lastMove;
+        gridContainer.insertBefore(item, nextSibling);
+        item.className = appliedClasses.join(' ');
+        item.style.height = originalHeight;
 
-        // Initial Live Search setting
-        const enable_live_search = localStorage.getItem("enable_live_search");
-        if(enable_live_search === "true") {
-            $("#searchOption").prop("checked", true);
-            enableLiveSearch();
-        } else {
-            $("#searchOption").prop("checked", false);
-            disableLiveSearch();
-        }
+        lastMove = { item: null, nextSibling: null, appliedClasses: [], originalHeight: '' };
+        undoBtn.disabled = true;
+        updateSeparator();
+    }
 
-        // Live Search option change handler
-        $('#searchOption').on('change', function() {
-            if($(this).is(":checked")) {
-                localStorage.setItem("enable_live_search", "true");
-                enableLiveSearch();
-            } else {
-                localStorage.setItem("enable_live_search", "false");
-                disableLiveSearch();
+    function toggleTriage() {
+        isTriageActive = !isTriageActive;
+        GM_setValue('isTriageActive', isTriageActive);
+        updateToggleUI();
+    }
+
+    function initializeTriage() {
+        const newGridContainer = document.querySelector('.label-map-grid-item')?.parentElement;
+        if (newGridContainer && newGridContainer !== gridContainer) {
+            if (gridContainer) {
+                gridContainer.removeEventListener('click', handleGridClick);
             }
-        });
-
-        // Apply filters on initial load
-        window.applyFilters();
-    }
-
-    function department_highlighter(){
-        const disabled_dpt_category = ["toddler","大人","女士","男士","female","male","kids and adults","boy and men", "women and girl", "youth and child", "teenager and child","unisex",
-                   "ユニセックス","男女兼用","メンズレディース","teen","キッド","ティーン","ジュニア","-",
-                   "ベビー小物","ディース","レディース　メンズ　ユニセックス","メンズ　ユニセックス","レディース　ユニセックス","レディースパーカーストア","男式","女式",
-                   "????","dummy_574", "シニア","others","中性","サバイバル","サバイバルブーツ","false","ユース","ユニセックス・ユース","???", "男女通用","なし","帽子","ショートパンツ",
-                   "男tz", "女tz", "tz兒","dummy_001","ボーイズ ガールズ","ユニ大人","ユニアダルト","ユニキッズ","ユニ子供", "ユニベビー", "ユニ-ベビー","baby","bébé","bebê","bebek","Yeni Yürümeye Başlayan Çocuk","niemowlęta","bebis","Bebisar","bambini","ベビー^ベビー", "ベビー" ,"Bambini piccoli"];
-        const male_category = ["herren","hombre","hombres","homme","uomo","heren","mannen","mezczyzni","dla meżczyzn","masculino","homens","herr","för män","män","erkekler","erkek","メンズ","男性","mens","men","men's","メンズ^メンズ","男性用"];
-        const female_category = ["damen","mujer","mujeres","femme","donna","dames","vrouwen","vrouw","kobiety","kobiet","feminino","mulheres","för kvinnor","kvinna","kvinnor","damer","kadin","kadınlar","レディース","レディーズ","女性","women","womens","woman","womans","womens","women's","女性用","ウィメンズ"];
-        const boy_category = ["ボーイズ","ボーイ","boys","boy","男子","男の子","boyz","boy's","少年","ボーイズ^ボーイズ","男童","男婴","男孩", "jungen","niño","niños","niños ","niño","garçon","ragazzo","jongens","chlopcy ","dla chłopców ","chlopak ","chłopiec","meninos","pojke ","pojk ","pojkar ","kille ","killar","erkek çocuk"];
-        const girl_category = ["mädchen","niñas","niña","niñas","niña","fille","ragazza","meisjes","meiden","dziewczyny","meninas","flicka","flick","flickor","tjej","tjejer","kızlar","女童","女孩","ガールズ","ガール" ,"girls" ,"girl","女子","女の子","girl's","少女","ガールズ^ガールズ"];
-        const unisex_adult_category = ["unisex–erwachsene","unisex adulto","adultos unisex","unisex adulto","adultos unisex","adulte unisexe","unisex - adulto","uniseks-volwassene","unisex dla dorosłych","uniseks dla dorosłych","dorośli, unisex","adulto-unissex","unisex - vuxen or unisex vuxna","üniseks yetiskin or uniseks-yetişkinler","unisex-adult","ユニセックス大人","unisexadult","ユニ・アダルト","ユニセックスアダルト","ユニセックス (大人)","男女兼用-大人","unisex-kid","unisex kid","unisex kids","unisex-kids"];
-        const baby_boy_category = ["ベビーボーイズ","ベビー・ボーイズ","baby boys","baby-boys","baby-jungen","bebé-niños","bebé-niño","bebé-niños","bébé garçon","bambino","bimbo","baby-jongens","baby jongen","niemowleta-chlopcy","bebê-meninos","bebisar-pojkar","bebispojke","erkek bebek","男の子の赤ちゃん","赤ちゃん 男の子","ベビー-男の子","ベビー・男の子"];
-        const baby_girl_category = ["baby girl","baby girls", "baby girl's","ベビーガールズ","ベビー・ガールズ","baby - mädchen","bebé-niñas ","bebé-niñas","bebé-niñas","bébé fille","bambina","bimbi","baby-meisjes","baby-meisje","niemowleta-dziewczynki","niemowlę-dziewczynka","bebê-meninas",
-                "bebisar - flickor","bebisflicka","kiz bebek","赤ちゃん 女の子","女の子の赤ちゃん"];
-        const child_no_gender_category = ["unisex child","unisex-child","中性童","kind","kinder","enfant","bambini","bambino","kind","dziecko","dzieci","criança","barn","çocuk","unisex-child","ユニセックス子供","ユニセックス(子供)","ユニセックスキッズ","ユニセックス 子供" ,"ユニセックス（子共）","uniseks-kind","bambino","kid","kids","キッズ"];
-        const baby_no_gender_category = ["unisex-baby","unisex baby","ユニセックスベビー" ,"unisex bebé"];
-        const infant_category = ["infant"];
-
-        // Select all potential department text elements
-        const departmentTextElements = $("div.label-map-grid-item div.label-map-item p:nth-child(6), div.prompt-item > div > p:nth-child(5),div.label-map-grid-item div.label-map-item p:nth-child(7), div.prompt-item > div > p:nth-child(6)");
-
-        if (departmentTextElements.length === 0) {
-            console.warn("Department highlighter: No department text elements found with current selectors.");
-            // You might need to adjust the selectors (p:nth-child(X)) based on the actual HTML structure.
+            gridContainer = newGridContainer;
+            gridContainer.addEventListener('click', handleGridClick);
+            updateSeparator();
         }
-
-        departmentTextElements.each(function(){
-            let department_attr_val = $(this).text().replace("department:","").toLowerCase().replace(/\s+/g, "").replace(/―/g,"").replace(/・/g,"").replace(/\(/g,"").replace(/\)/g,"").replace(/\（/g,"").replace(/\）/g,"").replace(/\-/g,"").replace(/\'/g,"");
-
-            if (disabled_dpt_category.includes(department_attr_val)) {
-                $(this).css({"background-color":"#6B6B6B"});
-            } else if (male_category.includes(department_attr_val)) {
-                $(this).css({"background-color":"#7CDFF4"});
-            } else if (female_category.includes(department_attr_val)) {
-                $(this).css({"background-color":"#B0F98B"});
-            } else if (unisex_adult_category.includes(department_attr_val)) {
-                $(this).css({"background-color":"#C689FD"});
-            } else if (boy_category.includes(department_attr_val)) {
-                $(this).css({"background-color":"#FFF0B1"});
-            } else if (girl_category.includes(department_attr_val)) {
-                $(this).css({"background-color":"#FFB9F5"});
-            } else if (baby_boy_category.includes(department_attr_val)) {
-                $(this).css({"background-color":"#A2C4AC"});
-            } else if (baby_girl_category.includes(department_attr_val)) {
-                $(this).css({"background-color":"#FA818D"});
-            } else if (baby_no_gender_category.includes(department_attr_val)) {
-                $(this).css({"background-color":"#AC0065"});
-            } else if (child_no_gender_category.includes(department_attr_val)) {
-                $(this).css({"background-color":"#0065ac"});
-            } else if (infant_category.includes(department_attr_val)) {
-                $(this).css({"background-color":"#65ac00"});
-            }
-        });
     }
 
-    function hide_skip_button(){
-        $("awsui-button.label-map-question-skip").hide();
-    }
-
-    function disable_submit(){
-        function change_css(){
-            const submitButton = $(".label-map-question-submit > button[type='submit']");
-            const submitButtonIcon = $(".label-map-question-submit .awsui-button-icon");
-
-            if(submitButtonIcon.length){ // Check if the icon button exists (might indicate a disabled state)
-                submitButton.css({"opacity":"1.0","background-color":"grey","pointer-events":"none", "border-color":"grey"});
-                submitButton.prop("disabled", true);
-                submitButtonIcon.css({"opacity":"1.0","background-color":"grey","pointer-events":"none"});
-                submitButtonIcon.prop("disabled", true);
-            } else {
-                submitButton.css({"opacity":"1.0","background-color":"green","pointer-events":"auto", "border-color":"green"});
-                submitButton.prop("disabled", false);
-                // No need to enable icon button if it doesn't exist or doesn't have these properties
+    const observer = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+            if (mutation.addedNodes.length > 0 || mutation.removedNodes.length > 0) {
+                initializeTriage();
+                return;
             }
         }
-        $(document).ready(function() { change_css(); });
-        $(document).on('click keyup', function() { change_css(); }); // Listen for clicks and keyups
-    }
+    });
 
-    // Helper function to handle checkbox settings
-    function setupCheckboxSetting(checkboxId, localStorageKey, actionFunction = null) {
-        const storedValue = localStorage.getItem(localStorageKey);
-        const $checkbox = $(`#${checkboxId}`);
+    observer.observe(document.body, { childList: true, subtree: true });
 
-        if (storedValue === null) {
-            localStorage.setItem(localStorageKey, "false");
-            $checkbox.prop("checked", false);
-        } else {
-            $checkbox.prop("checked", storedValue === "true");
-        }
+    undoBtn.addEventListener('click', undoLastMove);
+    toggleBtn.addEventListener('click', toggleTriage);
+    updateToggleUI();
+    setTimeout(initializeTriage, 500);
 
-        $checkbox.off('click').on('click', function () {
-            $("#notice_box").stop(true, true).show().delay(1000).fadeOut(); // Stop existing animations
-            const isChecked = $(this).prop('checked');
-            localStorage.setItem(localStorageKey, isChecked.toString());
-            if (actionFunction) {
-                // For actions that need to be applied/removed dynamically
-                if (isChecked) {
-                    actionFunction();
-                } else {
-                    // For some actions like highlighter or hide/disable, a reload might be needed to revert.
-                    // Or implement specific "undo" logic in actionFunction if possible.
-                    console.log(`Setting '${localStorageKey}' unchecked. Page reload might be needed to revert effects.`);
+    document.addEventListener('keydown', (e) => {
+        if (!isTriageActive) return;
+        const key = e.key.toLowerCase();
+        if (key === 'z') undoLastMove();
+        if (['y', 'n', 'f'].includes(key)) {
+            const active = document.activeElement;
+            const item = active?.closest('.label-map-grid-item');
+            if (!item) return;
+            const labelButtons = item.querySelectorAll('.label-map-label-button');
+            const keyToLabel = { 'y': 'Yes', 'n': 'No', 'f': 'Flag' };
+            for (let btn of labelButtons) {
+                if (btn.textContent.trim().toLowerCase() === keyToLabel[key].toLowerCase()) {
+                    handleGridClick(btn, keyToLabel[key]);
+                    break;
                 }
             }
-        });
-
-        // Apply initial action if setting is true
-        if (storedValue === "true" && actionFunction) {
-            actionFunction();
         }
-    }
-
-    function initial_settings(){
-        setupCheckboxSetting("dpt_highlighter", "dpt_highlighter", department_highlighter);
-        setupCheckboxSetting("hide_skip_btn", "hide_skip_btn", hide_skip_button);
-        setupCheckboxSetting("disable_submit_btn", "disable_submit_btn", disable_submit);
-        setupCheckboxSetting("enable_dept_link", "enable_dept_link"); // No direct JS action
-        setupCheckboxSetting("enable_chime_btn", "enable_chime_btn"); // Action handled in get_image_url
-        setupCheckboxSetting("copy_image_id", "copy_image_id"); // Action handled in get_image_url
-    }
-
-    // Placeholder functions for audit_page and verification_page, as their implementations were not provided.
-    // These are necessary because waitForKeyElements refers to them.
-    function audit_page() {
-        console.log("audit_page triggered. (Implementation not provided in script)");
-        // Add any logic here that should run when the audit page elements are ready
-    }
-
-    function verification_page() {
-        console.log("verification_page triggered. (Implementation not provided in script)");
-        // Add any logic here that should run when the verification page elements are ready
-    }
-
-    // renderFilters function - populates filter buttons based on page content
-    function renderFilters() {
-        departmentSet.clear();
-        keywordSet.clear();
-        fitTypeSet.clear();
-
-        // Iterate through all grid items to extract department, keywords, and fit_type
-        $(".label-map-grid-item").each(function () {
-            const $this = $(this); // Cache the current element
-
-            // Extract department
-            const department = $this.find("p:contains('department:')").text().replace("department:", "").trim();
-            if (department) departmentSet.add(department);
-
-            // Extract keywords (split by comma if multiple)
-            const keywords = $this.find("p:contains('keywords:')").text().replace("keywords:", "").trim();
-            if (keywords) keywords.split(',').forEach(k => keywordSet.add(k.trim()));
-
-            // Extract fit_type
-            const fitType = $this.find("p:contains('fit_type:')").text().replace("fit_type:", "").trim();
-            if (fitType) fitTypeSet.add(fitType);
-        });
-
-        // Log the extracted data for debugging
-        console.log("Department Set:", Array.from(departmentSet));
-        console.log("Keyword Set:", Array.from(keywordSet));
-        console.log("Fit Type Set:", Array.from(fitTypeSet));
-
-
-        // Clear previous buttons before rendering new ones
-        $("#department_filters").empty();
-        $("#keyword_filters").empty();
-        $("#fit_type_filters").empty();
-
-        // Render Department filter buttons
-        departmentSet.forEach(dpt => {
-            const button = $(`<button class="filter_department" data-department="${dpt}">${dpt}</button>`);
-            button.on("click", function () {
-                $(".filter_department").removeClass("selected");
-                $(this).addClass("selected");
-                window.currentSelectedDepartment = $(this).data("department");
-                window.applyFilters();
-            });
-            $("#department_filters").append(button);
-        });
-
-        // Render Keyword filter buttons
-        keywordSet.forEach(k => {
-            $("#keyword_filters").append(`<button class=\"filter_keyword\" data-keyword=\"${k}\">${k}</button>`);
-        });
-        $(".filter_keyword").on("click", function () {
-            const sel = $(this).data("keyword").toLowerCase();
-            $(".label-map-grid-item").each(function () {
-                $(this).toggle($(this).text().toLowerCase().includes(sel));
-            });
-        });
-
-        // Render Fit Type filter buttons
-        fitTypeSet.forEach(ft => {
-            $("#fit_type_filters").append(`<button class=\"filter_fit\" data-fit=\"${ft}\">${ft}</button>`);
-        });
-        $(".filter_fit").on("click", function () {
-            const sel = $(this).data("fit").toLowerCase();
-            $(".label-map-grid-item").each(function () {
-                $(this).toggle($(this).text().toLowerCase().includes(sel));
-            });
-        });
-
-        // 🌐 Recheck Button functionality
-        $("#rerun_translation_check").on("click", function () {
-            const btn = $(this);
-            btn.css({ transform: 'rotate(0deg)', transition: 'transform 0.4s ease' });
-            setTimeout(() => {
-                btn.css('transform', 'rotate(360deg)');
-                setTimeout(() => renderFilters(), 400); // Re-run renderFilters after rotation
-            }, 0);
-        });
-    }
-
-    // runWithDelay function - waits for #department_filters to exist before rendering filters
-    function runWithDelay() {
-        const check = setInterval(() => {
-            if (document.querySelector("#department_filters")) {
-                clearInterval(check);
-                renderFilters();
-            }
-        }, 500);
-    }
-
+    });
 })();
