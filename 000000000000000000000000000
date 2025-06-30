@@ -1,13 +1,12 @@
 
 // ==UserScript==
-// @name         GCO Unified C2P Utilities (Optimized & Fixed)
+// @name         GCO Unified C2P Utilities (Optimized & Fixed - V2)
 // @namespace    GCO_UNIFIED_C2P
-// @version      3.2
+// @version      3.3
 // @description  Combines Parent ID matching, "Yes to Unselected" button, and Advanced Triage with a single, unified, draggable UI and improved performance for IR Editor C2P pages.
 // @match        *://ir-editor.amazon.com/questionHub*
 // @match        https://ir-editor.amazon.com/*
 // @require      https://code.jquery.com/jquery-3.6.0.min.js
-// @require      https://gist.github.com/BrockA/2625891/raw/waitForKeyElements.js
 // @grant        GM_addStyle
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -231,6 +230,9 @@
 
     // --- GCO_C2P_MATCHING_VAL_SCRIPT_FilterFix Functions ---
     function getVpiID() {
+        // Optimized XPath to be more robust, targeting an ID if possible or a more generic path.
+        // Reverted to the original more specific XPath as a starting point if no ID is available
+        // to avoid introducing new issues.
         const node = document.evaluate(
             "/html/body/div/div/awsui-app-layout/div/main/div/div[2]/div/span/div/div[2]/div/div[1]/div[2]/div",
             document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null
@@ -259,15 +261,17 @@
 
     function applyFilter() {
         const vpiID = getVpiID();
+        const filterSection = $('#gco_filter_section');
+
         if (!vpiID) {
             counts = { match: 0, nomatch: 0, all: 0 };
             $('#gco_count_match').text(`✔️ ${counts.match}`);
             $('#gco_count_nomatch').text(`❌ ${counts.nomatch}`);
             $('#gco_count_all').text(`🔁 ${counts.all}`);
-            $('#gco_filter_section').hide();
+            filterSection.hide();
             return;
         } else {
-            $('#gco_filter_section').show();
+            filterSection.show();
         }
 
         const items = getVEAItems();
@@ -356,6 +360,7 @@
             itemToMove.style.height = lastMove.originalHeight;
         };
 
+        // Use a small timeout to allow height to be set before transition starts
         setTimeout(() => {
             itemToMove.addEventListener('transitionend', afterVanish, { once: true });
             itemToMove.classList.add('triage-vanishing');
@@ -459,34 +464,18 @@
 
     // --- Main Execution Orchestration ---
 
-    // Using a single MutationObserver to watch for significant DOM changes,
-    // especially those indicating page content has loaded or changed.
-    const primaryObserver = new MutationObserver((mutations) => {
-        let contentLoaded = false;
-        for (const mutation of mutations) {
-            // Check for additions of .label-map-grid-item which indicates data loading
-            if (mutation.addedNodes.length > 0) {
-                for (const node of mutation.addedNodes) {
-                    if (node.nodeType === 1 && $(node).find('.label-map-grid-item').length > 0) {
-                        contentLoaded = true;
-                        break;
-                    }
-                }
-            }
-            if (contentLoaded) break;
-        }
-
-        if (contentLoaded) {
-            // Use requestAnimationFrame for next available browser repaint, then a microtask queue with Promise.resolve()
-            // for potentially faster execution than setTimeout(0)
-            requestAnimationFrame(() => {
-                Promise.resolve().then(() => {
-                    makeUnifiedUI();
-                    applyFilter();
-                    initializeTriage();
-                });
-            });
-        }
+    // A simpler and robust MutationObserver setup.
+    // It watches for any significant DOM change within the document body,
+    // and when changes occur, it triggers the main initialization functions
+    // after a short delay to ensure elements are rendered.
+    const primaryObserver = new MutationObserver((mutationsList, observer) => {
+        // Debounce the observer calls to avoid performance issues from too frequent updates
+        clearTimeout(window._gcoUnifiedTimeout);
+        window._gcoUnifiedTimeout = setTimeout(() => {
+            makeUnifiedUI();
+            applyFilter();
+            initializeTriage();
+        }, 100); // A small delay to allow DOM to settle after changes
     });
 
     // Start observing the body for child list and subtree changes
@@ -494,13 +483,9 @@
 
     // Initial load setup for when page content is already present or loads quickly
     window.addEventListener('load', () => {
-        requestAnimationFrame(() => {
-            Promise.resolve().then(() => {
-                makeUnifiedUI();
-                applyFilter();
-                initializeTriage();
-            });
-        });
+        makeUnifiedUI();
+        applyFilter();
+        initializeTriage();
     });
 
     // Yes to Unselected keyboard shortcut
@@ -512,4 +497,3 @@
     });
 
 })();
-
