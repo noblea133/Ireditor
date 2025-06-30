@@ -1,8 +1,8 @@
 
 // ==UserScript==
-// @name         GCO Unified C2P Utilities (Optimized)
+// @name         GCO Unified C2P Utilities (Optimized & Fixed)
 // @namespace    GCO_UNIFIED_C2P
-// @version      3.1
+// @version      3.2
 // @description  Combines Parent ID matching, "Yes to Unselected" button, and Advanced Triage with a single, unified, draggable UI and improved performance for IR Editor C2P pages.
 // @match        *://ir-editor.amazon.com/questionHub*
 // @match        https://ir-editor.amazon.com/*
@@ -17,7 +17,7 @@
     'use strict';
 
     // --- Constants ---
-    [span_0](start_span)[span_1](start_span)const MATCH_COLOR = '#fff8b3';[span_0](end_span)[span_1](end_span)
+    const MATCH_COLOR = '#fff8b3';
     const DECISION_COLOR_MAPPING = {
         'Match': 'triage-match',
         'Yes': 'triage-match',
@@ -25,14 +25,14 @@
         'No': 'triage-no-match',
         'Flag': 'triage-flag',
         'Uncertain': 'triage-flag'
-    [span_2](start_span)};[span_2](end_span)
+    };
 
     // --- State Variables ---
-    [span_3](start_span)let currentFilter = 'all';[span_3](end_span)
-    [span_4](start_span)let counts = { match: 0, nomatch: 0, all: 0 };[span_4](end_span)
-    [span_5](start_span)let gridContainer = null;[span_5](end_span)
-    [span_6](start_span)[span_7](start_span)let lastMove = { item: null, nextSibling: null, appliedClasses: [], originalHeight: '' };[span_6](end_span)[span_7](end_span)
-    let isTriageActive = GM_getValue('isTriageActive', true); [span_8](start_span)[span_9](start_span)// Load saved state[span_8](end_span)[span_9](end_span)
+    let currentFilter = 'all';
+    let counts = { match: 0, nomatch: 0, all: 0 };
+    let gridContainer = null;
+    let lastMove = { item: null, nextSibling: null, appliedClasses: [], originalHeight: '' };
+    let isTriageActive = GM_getValue('isTriageActive', true); // Load saved state
 
     // --- Unified Styles ---
     GM_addStyle(`
@@ -48,7 +48,7 @@
             box-shadow: 0 4px 15px rgba(0,0,0,0.2);
             z-index: 9999;
             user-select: none;
-            cursor: grab; /* Changed to grab for clarity */
+            cursor: grab;
             display: flex;
             flex-direction: column;
             gap: 12px;
@@ -93,8 +93,8 @@
             border: 1px solid #ccc;
             background: #f0f0f0;
             transition: background-color 0.2s, color 0.2s, border-color 0.2s;
-            flex-grow: 1; /* Allows buttons to grow */
-            min-width: 80px; /* Minimum width for buttons */
+            flex-grow: 1;
+            min-width: 80px;
         }
         #gco_filter_section button.active {
             background-color: #4CAF50;
@@ -105,28 +105,28 @@
             font-size: 12px;
             text-align: center;
             color: #555;
-            width: 100%; /* Ensure counts are on their own line */
+            width: 100%;
         }
         .gco-hidden {
-            [span_10](start_span)display: none !important;[span_10](end_span)
+            display: none !important;
         }
 
         /* Yes to Unselected Button Styles */
         #gco-yts-btn {
-            [span_11](start_span)background-color: #28a745;[span_11](end_span)
-            [span_12](start_span)color: white;[span_12](end_span)
-            [span_13](start_span)border: none;[span_13](end_span)
+            background-color: #28a745;
+            color: white;
+            border: none;
             padding: 10px 18px;
-            [span_14](start_span)border-radius: 6px;[span_14](end_span)
+            border-radius: 6px;
             font-size: 15px;
-            [span_15](start_span)font-weight: bold;[span_15](end_span)
-            [span_16](start_span)cursor: pointer;[span_16](end_span)
-            width: 100%; /* Make button span full width of its container */
-            box-sizing: border-box; /* Include padding/border in width */
+            font-weight: bold;
+            cursor: pointer;
+            width: 100%;
+            box-sizing: border-box;
             transition: background-color 0.2s;
         }
         #gco-yts-btn:hover {
-            [span_17](start_span)background-color: #218838;[span_17](end_span)
+            background-color: #218838;
         }
 
         /* Triage Controls Styles */
@@ -137,36 +137,36 @@
             width: 100%;
         }
         #triage-controls-section button {
-            [span_18](start_span)padding: 8px 15px;[span_18](end_span)
-            [span_19](start_span)font-size: 14px;[span_19](end_span)
-            [span_20](start_span)border: 1px solid #ccc;[span_20](end_span)
-            [span_21](start_span)border-radius: 5px;[span_21](end_span)
-            [span_22](start_span)cursor: pointer;[span_22](end_span)
-            [span_23](start_span)font-weight: bold;[span_23](end_span)
+            padding: 8px 15px;
+            font-size: 14px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
             transition: background-color 0.2s, color 0.2s, border-color 0.2s;
             flex-grow: 1;
         }
         #triage-controls-section button:disabled {
-            [span_24](start_span)opacity: 0.5;[span_24](end_span)
-            [span_25](start_span)cursor: not-allowed;[span_25](end_span)
+            opacity: 0.5;
+            cursor: not-allowed;
         }
         #undo-triage-btn {
-            [span_26](start_span)background: #6c757d;[span_26](end_span)
-            [span_27](start_span)color: white;[span_27](end_span)
+            background: #6c757d;
+            color: white;
         }
         #undo-triage-btn:hover:not(:disabled) {
             background: #5a6268;
         }
         #toggle-triage-btn.active {
-            [span_28](start_span)background: #007bff;[span_28](end_span)
-            [span_29](start_span)color: white;[span_29](end_span)
+            background: #007bff;
+            color: white;
         }
         #toggle-triage-btn.active:hover {
             background: #0056b3;
         }
         #toggle-triage-btn.paused {
-            [span_30](start_span)background: #ffc107;[span_30](end_span)
-            color: #333; /* Make text readable on yellow */
+            background: #ffc107;
+            color: #333;
         }
         #toggle-triage-btn.paused:hover {
             background: #e0a800;
@@ -174,36 +174,36 @@
 
         /* Triage Card Styling */
         .triage-processed {
-            [span_31](start_span)transition: opacity 0.3s ease-in-out;[span_31](end_span)
+            transition: opacity 0.3s ease-in-out;
         }
-        .triage-match { border-left: 5px solid #28a745; [span_32](start_span)}
-        .triage-no-match { border-left: 5px solid #dc3545; }[span_32](end_span)
-        .triage-flag { border-left: 5px solid #ffc107; [span_33](start_span)}
+        .triage-match { border-left: 5px solid #28a745; }
+        .triage-no-match { border-left: 5px solid #dc3545; }
+        .triage-flag { border-left: 5px solid #ffc107; }
 
         /* Triage Vanishing Animation */
         .triage-vanishing {
-            transition: all 0.4s ease-in-out;[span_33](end_span)
-            [span_34](start_span)opacity: 0;[span_34](end_span)
-            [span_35](start_span)height: 0 !important;[span_35](end_span)
-            [span_36](start_span)padding-top: 0 !important;[span_36](end_span)
-            [span_37](start_span)padding-bottom: 0 !important;[span_37](end_span)
-            [span_38](start_span)margin-top: 0 !important;[span_38](end_span)
-            [span_39](start_span)margin-bottom: 0 !important;[span_39](end_span)
-            [span_40](start_span)overflow: hidden;[span_40](end_span)
-            [span_41](start_span)border-width: 0 !important;[span_41](end_span)
+            transition: all 0.4s ease-in-out;
+            opacity: 0;
+            height: 0 !important;
+            padding-top: 0 !important;
+            padding-bottom: 0 !important;
+            margin-top: 0 !important;
+            margin-bottom: 0 !important;
+            overflow: hidden;
+            border-width: 0 !important;
         }
 
         /* Triage Separator */
         #triage-separator {
-            [span_42](start_span)width: 100%;[span_42](end_span)
-            [span_43](start_span)text-align: center;[span_43](end_span)
-            [span_44](start_span)font-weight: bold;[span_44](end_span)
-            [span_45](start_span)color: #888;[span_45](end_span)
-            [span_46](start_span)padding: 15px 0;[span_46](end_span)
-            [span_47](start_span)margin: 10px 0;[span_47](end_span)
-            [span_48](start_span)border-top: 2px dashed #ccc;[span_48](end_span)
-            [span_49](start_span)border-bottom: 2px dashed #ccc;[span_49](end_span)
-            order: 9998; [span_50](start_span)/* Ensures it stays after non-processed items */[span_50](end_span)
+            width: 100%;
+            text-align: center;
+            font-weight: bold;
+            color: #888;
+            padding: 15px 0;
+            margin: 10px 0;
+            border-top: 2px dashed #ccc;
+            border-bottom: 2px dashed #ccc;
+            order: 9998;
         }
     `);
 
@@ -215,8 +215,7 @@
             isDragging = true;
             offsetX = e.clientX - el.offsetLeft;
             offsetY = e.clientY - el.offsetTop;
-            // Prevent text selection during drag
-            e.preventDefault();
+            e.preventDefault(); // Prevent default drag behavior (e.g., text selection)
         });
 
         document.addEventListener('mousemove', function (e) {
@@ -235,170 +234,166 @@
         const node = document.evaluate(
             "/html/body/div/div/awsui-app-layout/div/main/div/div[2]/div/span/div/div[2]/div/div[1]/div[2]/div",
             document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null
-        [span_51](start_span)).singleNodeValue;[span_51](end_span)
-        [span_52](start_span)if (!node) return null;[span_52](end_span)
+        ).singleNodeValue;
+        if (!node) return null;
         for (const p of node.querySelectorAll("p")) {
-            [span_53](start_span)const m = p.textContent.match(/(?:example_asin_parent_id|parent_id):\s*(\S+)/i);[span_53](end_span)
-            [span_54](start_span)if (m) return m[1];[span_54](end_span)
+            const m = p.textContent.match(/(?:example_asin_parent_id|parent_id):\s*(\S+)/i);
+            if (m) return m[1];
         }
-        [span_55](start_span)return null;[span_55](end_span)
+        return null;
     }
 
     function getVEAItems() {
         return Array.from(document.querySelectorAll('.label-map-grid-item')).map(card => {
             let pid = null, target = null;
             card.querySelectorAll('p').forEach(p => {
-                [span_56](start_span)const m = p.textContent.match(/(?:example_asin_parent_id|parent_id):\s*(\S+)/i);[span_56](end_span)
+                const m = p.textContent.match(/(?:example_asin_parent_id|parent_id):\s*(\S+)/i);
                 if (m) {
                     pid = m[1];
                     target = p;
                 }
             });
-            [span_57](start_span)return { card, pid, target };[span_57](end_span)
+            return { card, pid, target };
         });
     }
 
     function applyFilter() {
-        [span_58](start_span)const vpiID = getVpiID();[span_58](end_span)
+        const vpiID = getVpiID();
         if (!vpiID) {
-            // If vpiID is not found, clear counts and hide filter UI
             counts = { match: 0, nomatch: 0, all: 0 };
             $('#gco_count_match').text(`✔️ ${counts.match}`);
             $('#gco_count_nomatch').text(`❌ ${counts.nomatch}`);
             $('#gco_count_all').text(`🔁 ${counts.all}`);
-            $('#gco_filter_section').hide(); // Hide filter section if no parent ID
+            $('#gco_filter_section').hide();
             return;
         } else {
-            $('#gco_filter_section').show(); // Show if parent ID is found
+            $('#gco_filter_section').show();
         }
 
-        [span_59](start_span)const items = getVEAItems();[span_59](end_span)
-        [span_60](start_span)counts = { match: 0, nomatch: 0, all: items.length };[span_60](end_span)
+        const items = getVEAItems();
+        counts = { match: 0, nomatch: 0, all: items.length };
         items.forEach(({ card, pid, target }) => {
-            [span_61](start_span)card.classList.remove('gco-hidden');[span_61](end_span)
-            [span_62](start_span)if (target) target.style.backgroundColor = '';[span_62](end_span)
-            [span_63](start_span)const isMatch = pid === vpiID;[span_63](end_span)
+            card.classList.remove('gco-hidden');
+            if (target) target.style.backgroundColor = '';
+            const isMatch = pid === vpiID;
 
             if (isMatch) {
-                [span_64](start_span)counts.match++;[span_64](end_span)
-                [span_65](start_span)if (target) target.style.backgroundColor = MATCH_COLOR;[span_65](end_span)
+                counts.match++;
+                if (target) target.style.backgroundColor = MATCH_COLOR;
             } else {
-                [span_66](start_span)counts.nomatch++;[span_66](end_span)
+                counts.nomatch++;
             }
 
-            [span_67](start_span)if (currentFilter === 'match' && !isMatch) card.classList.add('gco-hidden');[span_67](end_span)
-            [span_68](start_span)if (currentFilter === 'nomatch' && isMatch) card.classList.add('gco-hidden');[span_68](end_span)
+            if (currentFilter === 'match' && !isMatch) card.classList.add('gco-hidden');
+            if (currentFilter === 'nomatch' && isMatch) card.classList.add('gco-hidden');
         });
 
-        [span_69](start_span)$('#gco_count_match').text(`✔️ ${counts.match}`);[span_69](end_span)
-        [span_70](start_span)$('#gco_count_nomatch').text(`❌ ${counts.nomatch}`);[span_70](end_span)
-        [span_71](start_span)$('#gco_count_all').text(`🔁 ${counts.all}`);[span_71](end_span)
+        $('#gco_count_match').text(`✔️ ${counts.match}`);
+        $('#gco_count_nomatch').text(`❌ ${counts.nomatch}`);
+        $('#gco_count_all').text(`🔁 ${counts.all}`);
     }
 
     // --- Advanced Dynamic Triage Functions ---
-    [span_72](start_span)const triageSeparator = document.createElement('div');[span_72](end_span)
-    [span_73](start_span)triageSeparator.id = 'triage-separator';[span_73](end_span)
-    [span_74](start_span)triageSeparator.textContent = '--- Processed ---';[span_74](end_span)
+    const triageSeparator = document.createElement('div');
+    triageSeparator.id = 'triage-separator';
+    triageSeparator.textContent = '--- Processed ---';
 
     function updateToggleUI() {
-        [span_75](start_span)const toggleBtn = document.getElementById('toggle-triage-btn');[span_75](end_span)
+        const toggleBtn = document.getElementById('toggle-triage-btn');
         if (toggleBtn) {
             if (isTriageActive) {
-                [span_76](start_span)toggleBtn.textContent = 'Pause';[span_76](end_span)
-                [span_77](start_span)toggleBtn.classList.add('active');[span_77](end_span)
-                [span_78](start_span)toggleBtn.classList.remove('paused');[span_78](end_span)
+                toggleBtn.textContent = 'Pause';
+                toggleBtn.classList.add('active');
+                toggleBtn.classList.remove('paused');
             } else {
-                [span_79](start_span)toggleBtn.textContent = 'Resume';[span_79](end_span)
-                [span_80](start_span)toggleBtn.classList.add('paused');[span_80](end_span)
-                [span_81](start_span)toggleBtn.classList.remove('active');[span_81](end_span)
+                toggleBtn.textContent = 'Resume';
+                toggleBtn.classList.add('paused');
+                toggleBtn.classList.remove('active');
             }
         }
     }
 
     function updateSeparator() {
-        [span_82](start_span)if (!gridContainer) return;[span_82](end_span)
-        [span_83](start_span)const firstProcessed = gridContainer.querySelector('.triage-processed');[span_83](end_span)
+        if (!gridContainer) return;
+        const firstProcessed = gridContainer.querySelector('.triage-processed');
         if (firstProcessed) {
             if (!triageSeparator.parentElement || triageSeparator.nextSibling !== firstProcessed) {
-                [span_84](start_span)gridContainer.insertBefore(triageSeparator, firstProcessed);[span_84](end_span)
+                gridContainer.insertBefore(triageSeparator, firstProcessed);
             }
         } else if (triageSeparator.parentElement) {
-            [span_85](start_span)triageSeparator.parentElement.removeChild(triageSeparator);[span_85](end_span)
+            triageSeparator.parentElement.removeChild(triageSeparator);
         }
     }
 
     function handleGridClick(event) {
-        [span_86](start_span)if (!isTriageActive) return;[span_86](end_span)
-        [span_87](start_span)const button = event.target.closest('.label-map-label-button');[span_87](end_span)
+        if (!isTriageActive) return;
+        const button = event.target.closest('.label-map-label-button');
         if (!button) return;
 
-        [span_88](start_span)const itemToMove = event.target.closest('.label-map-grid-item');[span_88](end_span)
+        const itemToMove = event.target.closest('.label-map-grid-item');
         if (!itemToMove || itemToMove.classList.contains('triage-vanishing')) return;
 
-        // Store current state for undo
-        [span_89](start_span)lastMove.item = itemToMove;[span_89](end_span)
-        [span_90](start_span)lastMove.nextSibling = itemToMove.nextSibling;[span_90](end_span)
-        [span_91](start_span)lastMove.originalHeight = itemToMove.style.height;[span_91](end_span)
-        [span_92](start_span)lastMove.appliedClasses = Array.from(itemToMove.classList);[span_92](end_span)
-        [span_93](start_span)document.getElementById('undo-triage-btn').disabled = false;[span_93](end_span)
+        lastMove.item = itemToMove;
+        lastMove.nextSibling = itemToMove.nextSibling;
+        lastMove.originalHeight = itemToMove.style.height;
+        lastMove.appliedClasses = Array.from(itemToMove.classList);
+        document.getElementById('undo-triage-btn').disabled = false;
 
-        // Smooth collapse animation setup
-        [span_94](start_span)const itemHeight = itemToMove.getBoundingClientRect().height;[span_94](end_span)
-        [span_95](start_span)itemToMove.style.height = `${itemHeight}px`;[span_95](end_span)
+        const itemHeight = itemToMove.getBoundingClientRect().height;
+        itemToMove.style.height = `${itemHeight}px`;
 
         const afterVanish = () => {
-            [span_96](start_span)itemToMove.removeEventListener('transitionend', afterVanish);[span_96](end_span)
-            [span_97](start_span)const buttonText = button.textContent.trim();[span_97](end_span)
-            const colorClass = DECISION_COLOR_MAPPING[buttonText] || [span_98](start_span)'';[span_98](end_span)
+            itemToMove.removeEventListener('transitionend', afterVanish);
+            const buttonText = button.textContent.trim();
+            const colorClass = DECISION_COLOR_MAPPING[buttonText] || '';
             if (colorClass) itemToMove.classList.add(colorClass);
-            [span_99](start_span)itemToMove.classList.add('triage-processed');[span_99](end_span)
+            itemToMove.classList.add('triage-processed');
 
-            [span_100](start_span)gridContainer.appendChild(itemToMove);[span_100](end_span)
-            [span_101](start_span)updateSeparator();[span_101](end_span)
+            gridContainer.appendChild(itemToMove);
+            updateSeparator();
 
-            // Reset for next interaction
-            [span_102](start_span)itemToMove.classList.remove('triage-vanishing');[span_102](end_span)
-            [span_103](start_span)itemToMove.style.height = lastMove.originalHeight;[span_103](end_span)
+            itemToMove.classList.remove('triage-vanishing');
+            itemToMove.style.height = lastMove.originalHeight;
         };
 
-        // Trigger animation
         setTimeout(() => {
-            [span_104](start_span)itemToMove.addEventListener('transitionend', afterVanish, { once: true });[span_104](end_span)
-            [span_105](start_span)itemToMove.classList.add('triage-vanishing');[span_105](end_span)
-        }, 10); // Small delay to ensure CSS transitions apply
+            itemToMove.addEventListener('transitionend', afterVanish, { once: true });
+            itemToMove.classList.add('triage-vanishing');
+        }, 10);
     }
 
     function undoLastMove() {
-        [span_106](start_span)if (!lastMove.item) return;[span_106](end_span)
-        [span_107](start_span)const { item, nextSibling, appliedClasses, originalHeight } = lastMove;[span_107](end_span)
+        if (!lastMove.item) return;
+        const { item, nextSibling, appliedClasses, originalHeight } = lastMove;
 
-        [span_108](start_span)gridContainer.insertBefore(item, nextSibling);[span_108](end_span)
+        gridContainer.insertBefore(item, nextSibling);
 
-        item.className = appliedClasses.join(' '); [span_109](start_span)// Revert all classes[span_109](end_span)
-        [span_110](start_span)item.style.height = originalHeight;[span_110](end_span)
+        // Filter out triage-related classes before re-applying original classes
+        const classesToReapply = appliedClasses.filter(cls => !cls.startsWith('triage-'));
+        item.className = classesToReapply.join(' ');
+        item.style.height = originalHeight;
 
-        [span_111](start_span)lastMove = { item: null, nextSibling: null, appliedClasses: [], originalHeight: '' };[span_111](end_span)
-        [span_112](start_span)document.getElementById('undo-triage-btn').disabled = true;[span_112](end_span)
-        [span_113](start_span)updateSeparator();[span_113](end_span)
+        lastMove = { item: null, nextSibling: null, appliedClasses: [], originalHeight: '' };
+        document.getElementById('undo-triage-btn').disabled = true;
+        updateSeparator();
     }
 
     function toggleTriage() {
-        [span_114](start_span)isTriageActive = !isTriageActive;[span_114](end_span)
-        [span_115](start_span)GM_setValue('isTriageActive', isTriageActive);[span_115](end_span)
-        [span_116](start_span)updateToggleUI();[span_116](end_span)
+        isTriageActive = !isTriageActive;
+        GM_setValue('isTriageActive', isTriageActive);
+        updateToggleUI();
     }
 
     function initializeTriage() {
-        // Find the grid container dynamically
-        [span_117](start_span)const newGridContainer = document.querySelector('.label-map-grid-item')?.parentElement;[span_117](end_span)
+        const newGridContainer = document.querySelector('.label-map-grid-item')?.parentElement;
         if (newGridContainer && newGridContainer !== gridContainer) {
-            [span_118](start_span)console.log("Unified C2P Utilities: Initializing Triage on new grid container.");[span_118](end_span)
+            console.log("Unified C2P Utilities: Initializing Triage on new grid container.");
             if (gridContainer) {
-                [span_119](start_span)gridContainer.removeEventListener('click', handleGridClick);[span_119](end_span)
+                gridContainer.removeEventListener('click', handleGridClick);
             }
             gridContainer = newGridContainer;
-            [span_120](start_span)gridContainer.addEventListener('click', handleGridClick);[span_120](end_span)
-            [span_121](start_span)updateSeparator();[span_121](end_span)
+            gridContainer.addEventListener('click', handleGridClick);
+            updateSeparator();
         }
     }
 
@@ -406,11 +401,10 @@
     function handleYesToUnselectedClick() {
         $("div.label-map-grid-item").each(function () {
             const $item = $(this);
-            // Check if the item is visible and neither 'Yes' nor 'No' is selected
-            [span_122](start_span)const $yes = $item.find("div.label-map-label-button:contains('Yes')");[span_122](end_span)
-            [span_123](start_span)const $no = $item.find("div.label-map-label-button:contains('No')");[span_123](end_span)
-            [span_124](start_span)if ($item.is(":visible") && !$yes.hasClass("selected") && !$no.hasClass("selected")) {[span_124](end_span)
-                [span_125](start_span)$yes.click();[span_125](end_span)
+            const $yes = $item.find("div.label-map-label-button:contains('Yes')");
+            const $no = $item.find("div.label-map-label-button:contains('No')");
+            if ($item.is(":visible") && !$yes.hasClass("selected") && !$no.hasClass("selected")) {
+                $yes.click();
             }
         });
     }
@@ -448,37 +442,38 @@
 
         // Filter button event listeners
         $('#gco_filter_section button').on('click', function () {
-            [span_126](start_span)currentFilter = $(this).data('type');[span_126](end_span)
-            [span_127](start_span)$('#gco_filter_section button').removeClass('active');[span_127](end_span)
-            [span_128](start_span)$(this).addClass('active');[span_128](end_span)
-            [span_129](start_span)applyFilter();[span_129](end_span)
+            currentFilter = $(this).data('type');
+            $('#gco_filter_section button').removeClass('active');
+            $(this).addClass('active');
+            applyFilter();
         });
 
         // Yes to Unselected button event listener
-        [span_130](start_span)$("#gco-yts-btn").on("click", handleYesToUnselectedClick);[span_130](end_span)
+        $("#gco-yts-btn").on("click", handleYesToUnselectedClick);
 
         // Triage button event listeners
-        [span_131](start_span)document.getElementById('undo-triage-btn').addEventListener('click', undoLastMove);[span_131](end_span)
-        [span_132](start_span)document.getElementById('toggle-triage-btn').addEventListener('click', toggleTriage);[span_132](end_span)
-        updateToggleUI(); [span_133](start_span)// Initialize toggle button state[span_133](end_span)
+        document.getElementById('undo-triage-btn').addEventListener('click', undoLastMove);
+        document.getElementById('toggle-triage-btn').addEventListener('click', toggleTriage);
+        updateToggleUI(); // Initialize toggle button state
     }
 
     // --- Main Execution Orchestration ---
 
-    // Use a single MutationObserver to watch for significant DOM changes,
+    // Using a single MutationObserver to watch for significant DOM changes,
     // especially those indicating page content has loaded or changed.
     const primaryObserver = new MutationObserver((mutations) => {
         let contentLoaded = false;
         for (const mutation of mutations) {
-            // Check for additions/removals of elements that signify content loading
-            if (mutation.addedNodes.length > 0 && $(mutation.addedNodes).find('.label-map-grid-item').length) {
-                contentLoaded = true;
-                break;
+            // Check for additions of .label-map-grid-item which indicates data loading
+            if (mutation.addedNodes.length > 0) {
+                for (const node of mutation.addedNodes) {
+                    if (node.nodeType === 1 && $(node).find('.label-map-grid-item').length > 0) {
+                        contentLoaded = true;
+                        break;
+                    }
+                }
             }
-            if (mutation.removedNodes.length > 0 && $(mutation.removedNodes).find('.label-map-grid-item').length) {
-                contentLoaded = true;
-                break;
-            }
+            if (contentLoaded) break;
         }
 
         if (contentLoaded) {
@@ -495,9 +490,9 @@
     });
 
     // Start observing the body for child list and subtree changes
-    [span_134](start_span)[span_135](start_span)primaryObserver.observe(document.body, { childList: true, subtree: true });[span_134](end_span)[span_135](end_span)
+    primaryObserver.observe(document.body, { childList: true, subtree: true });
 
-    // Fallback/Initial load setup for when page content is already present or loads quickly
+    // Initial load setup for when page content is already present or loads quickly
     window.addEventListener('load', () => {
         requestAnimationFrame(() => {
             Promise.resolve().then(() => {
@@ -510,20 +505,11 @@
 
     // Yes to Unselected keyboard shortcut
     $(window).on("keydown", function (e) {
-        [span_136](start_span)if (e.shiftKey && e.key.toLowerCase() === "g") {[span_136](end_span)
-            [span_137](start_span)$("#gco-yts-btn").click();[span_137](end_span)
+        if (e.shiftKey && e.key.toLowerCase() === "g") {
+            e.preventDefault(); // Prevent default browser behavior if any
+            $("#gco-yts-btn").click();
         }
     });
 
-    // The waitForKeyElements is no longer needed for button creation as it's part of makeUnifiedUI.
-    // However, if the "Yes to Unselected" functionality relies on certain elements being present before it can execute
-    // (e.g., if it needs to find '.label-map-answer-buttons' before it clicks 'Yes'), we can still use it to trigger
-    // a re-initialization or simply rely on the MutationObserver for content changes.
-    // Given the current implementation where the click handler just iterates on visible items,
-    // the observer is sufficient for ensuring content is present.
-    // If specific elements are truly required to be *ready* before the button can function,
-    // we could keep a minimal waitForKeyElements targeting the grid items themselves.
-    // For now, let's remove the redundant call to `waitForKeyElements` for `addYesToUnselectedButton`.
-    // The `makeUnifiedUI` handles creation, and the click handler is robust.
-
 })();
+
